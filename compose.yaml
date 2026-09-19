@@ -1,0 +1,31 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/devflow.db
+      PORT: 3000
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - devflow:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  worker:
+    build: .
+    command: ["node", "src/worker.js"]
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/devflow.db
+    volumes:
+      - devflow:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  devflow:
