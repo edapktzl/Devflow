@@ -5,6 +5,7 @@ process.env.TOKEN_KEY='a'.repeat(64);
 process.env.GITHUB_WEBHOOK_SECRET='test-github-secret';
 process.env.SLACK_SIGNING_SECRET='test-slack-secret';
 process.env.SLACK_CLIENT_ID='fixture-slack-client';
+process.env.SLACK_CLIENT_SECRET='fixture-slack-secret';
 const {server}=await import('../src/server.js');
 const {all,get,run,tx,signature,crypt,enqueue,now,id}=await import('../src/core.js');
 const {tick,schedule}=await import('../src/worker.js');
@@ -38,6 +39,10 @@ test('OAuth callback exchanges code, encrypts token, binds org and consumes stat
  };assert.equal((await request(`/oauth/github/callback?state=${state}&code=valid`)).status,200);assert.equal((await request(`/oauth/github/callback?state=${state}&code=valid`)).status,400);await api(`/projects/${pid}`,'PATCH',{repo:'TEST/REPO'});assert.equal(get('SELECT repo FROM projects WHERE id=?',pid).repo,'test/repo');
  }finally{globalThis.fetch=original;}
  const integration=get('SELECT * FROM integrations WHERE org_id=? AND provider=?',org,'github');assert.equal(crypt(integration.token,true),'oauth-test-token');assert.equal(integration.external_id,'99');assert.ok(!JSON.stringify(await api(`/organizations/${org}/integrations`)).includes('token'));
+});
+test('OAuth provider failures return safe actionable errors without secrets',async()=>{
+ const start=await api(`/organizations/${org}/oauth/slack`,'POST',{}),state=new URL(start.url).searchParams.get('state');const original=globalThis.fetch;try{globalThis.fetch=async(url,options)=>String(url).startsWith(base)?original(url,options):new Response(JSON.stringify({ok:false,error:'invalid_code'}),{status:200});const rejected=await request(`/oauth/slack/callback?state=${state}&code=bad`);assert.equal(rejected.status,502);assert.equal(rejected.body.error,'slack OAuth authorization failed: invalid_code');
+ const retry=await api(`/organizations/${org}/oauth/slack`,'POST',{}),retryState=new URL(retry.url).searchParams.get('state');globalThis.fetch=async(url,options)=>{if(String(url).startsWith(base))return original(url,options);throw Object.assign(new Error('network unavailable'),{cause:{code:'EACCES'}})};const unavailable=await request(`/oauth/slack/callback?state=${retryState}&code=network`);assert.equal(unavailable.status,502);assert.equal(unavailable.body.error,'slack OAuth token exchange unavailable');}finally{globalThis.fetch=original;}
 });
 test('resync recovers missed PR merge through real adapter and deduplicates repeat scans',async()=>{
  const t=await api(`/projects/${pid}/tasks`,'POST',{title:'Resync recovery',column_id:columns.find(c=>c.name==='In Progress').id,assignee:(await api('/me')).id});
