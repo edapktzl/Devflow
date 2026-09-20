@@ -2,3 +2,4 @@
 data/
 *.vsix
 node_modules/
+*.log

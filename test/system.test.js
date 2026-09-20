@@ -4,6 +4,7 @@ process.env.DATABASE_PATH=':memory:';
 process.env.TOKEN_KEY='a'.repeat(64);
 process.env.GITHUB_WEBHOOK_SECRET='test-github-secret';
 process.env.SLACK_SIGNING_SECRET='test-slack-secret';
+process.env.SLACK_CLIENT_ID='fixture-slack-client';
 const {server}=await import('../src/server.js');
 const {all,get,run,tx,signature,crypt,enqueue,now,id}=await import('../src/core.js');
 const {tick,schedule}=await import('../src/worker.js');
@@ -28,6 +29,7 @@ test('SSE requires auth and emits project events',async()=>{const controller=new
 test('OAuth callback exchanges code, encrypts token, binds org and consumes state once',async()=>{
  process.env.GITHUB_CLIENT_ID='fixture-client';process.env.GITHUB_CLIENT_SECRET='fixture-secret';
  assert.equal((await request(`/api/organizations/${org}/oauth/github`,'POST',{},viewer)).status,403);
+ const slackStart=await api(`/organizations/${org}/oauth/slack`,'POST',{});assert.match(slackStart.url,/slack\.com\/oauth\/v2\/authorize/);assert.equal(new URL(slackStart.url).searchParams.get('client_id'),'fixture-slack-client');
  const {url}=await api(`/organizations/${org}/oauth/github`,'POST',{}),state=new URL(url).searchParams.get('state');
  const original=globalThis.fetch;try{globalThis.fetch=async(url,options)=>{
  if(String(url).startsWith(base))return original(url,options);
