@@ -61,7 +61,7 @@ GitHub'a yazma: issue aç/kapat, PR/issue yorum ekle, label ekle, branch oluştu
 5. OAuth'u yapan Slack kullanıcısı, kurulumu başlatan platform kullanıcısıyla eşlenir. Diğer kullanıcılar için bir organizasyon yöneticisi, Slack profilindeki member ID (`U…`) ile platform kullanıcı UUID'sini eşler. Bu yönetici kontrollü eşleme PoC'nin güven sınırıdır; kullanıcı kendi adına keyfi Slack kimliği talep edemez.
 6. Atanmış bir task oluşturun. Worker Slack mesajını gönderir. **Assign to Me** butonu imza, zaman damgası, workspace, kanal, identity ve güncel rol kontrolünden sonra task atar. **Open Task** platformu açar.
 
-Approve/Reject butonları uygulanmadı; minimum etkileşim Assign to Me ile sağlanır. Slack bildirim gönderiminde en az bir kez teslim yaklaşımı kullanılır: Slack isteği kabul edip worker yanıtı alamazsa tekrar mesaj oluşabilir. Platform notification inbox ve webhook işleme deduplication'ı bundan bağımsızdır.
+Approve/Reject butonları task'a Slack kimliğiyle yorum ekler; Reject ayrıca task'ı In Progress kolonuna döndürür. Assign to Me ve Open Task da desteklenir. Slack bildirim gönderiminde en az bir kez teslim yaklaşımı kullanılır: Slack isteği kabul edip worker yanıtı alamazsa tekrar mesaj oluşabilir. Platform notification inbox ve webhook işleme deduplication'ı bundan bağımsızdır.
 
 ## VS Code extension
 

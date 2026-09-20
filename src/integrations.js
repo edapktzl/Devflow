@@ -72,14 +72,20 @@ export function processEvent(eid){
 }
 export async function sendSlack(data){const p=get('SELECT * FROM projects WHERE id=? AND deleted_at IS NULL',data.project_id);if(!p?.slack_channel)return;
  const blocks=[{type:'section',text:{type:'plain_text',text:data.text.slice(0,2900)}}];
- if(data.task_id)blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'Assign to Me'},action_id:'assign',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Open Task'},url:`${process.env.PUBLIC_URL||'http://localhost:3000'}/?task=${data.task_id}`} ]});
+ if(data.task_id)blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'Approve'},action_id:'approve',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Reject'},style:'danger',action_id:'reject',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Assign to Me'},action_id:'assign',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Open Task'},url:`${process.env.PUBLIC_URL||'http://localhost:3000'}/?task=${data.task_id}`} ]});
  await external('slack',p.org_id,'chat.postMessage','POST',{channel:p.slack_channel,text:data.text,blocks});
 }
 export function slackAction(body){
- const action=body.actions?.[0];if(action?.action_id!=='assign')fail(400,'Unsupported action');
- const t=get('SELECT * FROM tasks WHERE id=? AND deleted_at IS NULL',Number(action.value));if(!t)fail(404,'Task not found');
+ const action=body.actions?.[0];if(!['assign','approve','reject'].includes(action?.action_id))fail(400,'Unsupported action');
+ const t=get('SELECT t.*,c.name AS status FROM tasks t JOIN columns c ON c.id=t.column_id WHERE t.id=? AND t.deleted_at IS NULL',Number(action.value));if(!t)fail(404,'Task not found');
  const p=get('SELECT * FROM projects WHERE id=? AND deleted_at IS NULL',t.project_id);if(!p)fail(404,'Project not found');
  const integration=get('SELECT * FROM integrations WHERE org_id=? AND provider=?',p.org_id,'slack');if(integration?.external_id!==body.team?.id||p.slack_channel!==body.channel?.id)fail(403,'Slack workspace/channel mismatch');
  const identity=get('SELECT * FROM identities WHERE provider=? AND external_id=? AND org_id=?','slack',body.user?.id||'',p.org_id);if(!identity)fail(403,'Link Slack identity first');access(identity.user_id,p.org_id,true);
- run('UPDATE tasks SET assignee=?,version=version+1 WHERE id=?',identity.user_id,t.id);emit(p.id,'task.assigned',{assignee:identity.user_id},t.id,identity.user_id,'slack');
+ if(action.action_id==='assign'){
+  run('UPDATE tasks SET assignee=?,version=version+1 WHERE id=?',identity.user_id,t.id);emit(p.id,'task.assigned',{assignee:identity.user_id},t.id,identity.user_id,'slack');return;
+ }
+ const approved=action.action_id==='approve',bodyText=approved?'Approved in Slack.':'Rejected in Slack; returning to In Progress.';
+ run('INSERT INTO comments VALUES(?,?,?,?,?)',id(),t.id,identity.user_id,bodyText,now());
+ emit(p.id,approved?'task.review_approved':'task.review_rejected',{body:bodyText},t.id,identity.user_id,'slack');
+ if(!approved&&t.status!=='In Progress'&&get('SELECT 1 FROM columns c JOIN boards b ON c.board_id=b.id WHERE b.project_id=? AND c.name=?',p.id,'In Progress'))move(t,'In Progress',identity.user_id,'slack');
 }
