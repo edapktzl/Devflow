@@ -11,7 +11,7 @@ const {all,get,run,tx,signature,crypt,enqueue,now,id}=await import('../src/core.
 const {tick,schedule}=await import('../src/worker.js');
 const {ingest,external,resync}=await import('../src/integrations.js');
 let base,owner,outsider,viewer,org,pid,tid,columns;
-async function request(path,method='GET',body,token=owner,headers={}){const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token||''}`,...headers},body:body===undefined?undefined:typeof body==='string'?body:JSON.stringify(body)});return {status:response.status,body:await response.json()};}
+async function request(path,method='GET',body,token=owner,headers={},fetchOptions={}){const response=await fetch(base+path,{method,redirect:fetchOptions.redirect||'follow',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token||''}`,...headers},body:body===undefined?undefined:typeof body==='string'?body:JSON.stringify(body)});const text=await response.text();let parsed=text;try{parsed=JSON.parse(text);}catch{}return {status:response.status,headers:response.headers,body:parsed};}
 async function api(path,method='GET',body,token=owner,headers={}){const result=await request('/api'+path,method,body,token,headers);assert.equal(result.status,200,JSON.stringify(result.body));return result.body;}
 async function drain(){let n=0;while(await tick()){if(++n>100)throw Error('Queue did not settle');}}
 async function user(email,name){await api('/auth/register','POST',{email,name,password:'long-password-123'},'');return api('/auth/login','POST',{email,password:'long-password-123'},'');}
