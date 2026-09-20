@@ -52,6 +52,7 @@ route('POST','/api/projects/:pid/rules',({user,p,b})=>{project(user,p.pid,true,t
 route('DELETE','/api/projects/:pid/rules/:rid',({user,p})=>{project(user,p.pid,true,true);run('UPDATE rules SET enabled=0 WHERE id=? AND project_id=?',p.rid,p.pid);emit(p.pid,'rule.disabled',{id:p.rid},null,user);return {ok:true};});
 route('GET','/api/organizations/:org/audit',({user,p})=>{access(user,p.org,false,true);return all('SELECT * FROM audit WHERE org_id=? ORDER BY id DESC LIMIT 200',p.org);});
 route('GET','/api/organizations/:org/integrations',({user,p})=>{access(user,p.org);return all('SELECT provider,external_id FROM integrations WHERE org_id=?',p.org);});
+route('GET','/api/organizations/:org/slack/identities',({user,p})=>{access(user,p.org);return all('SELECT user_id,external_id AS slack_user_id FROM identities WHERE provider=? AND org_id=? AND user_id=?','slack',p.org,user);});
 route('DELETE','/api/organizations/:org/integrations/:provider',({user,p})=>{access(user,p.org,true,true);run('DELETE FROM integrations WHERE org_id=? AND provider=?',p.org,p.provider);audit(p.org,user,'integration.disconnected',{provider:p.provider});return {ok:true};});
 route('GET','/api/organizations/:org/github/repositories',async({user,p})=>{access(user,p.org);return pages(p.org,'/user/repos?sort=updated');},{async:true});
 route('GET','/api/projects/:pid/github/objects',({user,p})=>{project(user,p.pid);return all('SELECT * FROM external_objects WHERE project_id=?',p.pid);});
