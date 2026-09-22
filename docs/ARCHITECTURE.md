@@ -82,6 +82,8 @@ Bu diyagram demo akışıdır; `InProgress` görünen adı `In Progress`tır. Ko
 
 Default rule'lar proje oluşturulunca DB'ye yazılır. `trigger`, opsiyonel `condition_status`, `action` ve `value` alanları vardır. PR açılış webhook'u tamamen kaçırılmışsa `pr.merged` için ek `In Progress → Done` kuralı resync sırasında toparlanmayı sağlar. Backlog/Todo task'lar otomatik tamamlanmaz. Desteklenen aksiyonlar `set_status`, `comment`, `slack`. Automation kaynaklı eventlerden tekrar status/comment automation çalıştırılmaz; döngü sınırlanır. Birden fazla birbiriyle çelişen kural tanımlamayın; öncelik/conflict çözümü yoktur.
 
+Koşullar event işlenirken mevcut görev durumuna göre değerlendirilir. Eşleşen özel Slack kuralları varsa varsayılan bildirim gönderilmez; her kural `slack:{eventId}:rule:{ruleId}` anahtarıyla ayrı bir iş oluşturur. Eşleşen Slack kuralı yoksa varsayılan `slack:{eventId}` bildirimi kullanılır. İş yeniden işlendiğinde aynı kuyruk kaydı çoğalmaz. Bu garanti, Slack mesajı kabul ettikten hemen sonra worker'ın çökmesi gibi belirsiz dış teslimlerde exactly-once garantisi değildir.
+
 ## Worker / queue
 
 ```mermaid
@@ -116,7 +118,11 @@ stateDiagram-v2
 | Slack action | İmzalı form body hash'i ve side effect aynı transaction |
 | Deadline | `deadline:{task_id}:{due_date}` unique event |
 
-GitHub PR/commit senkronizasyonu webhook ve resync arasında ortak ingest fonksiyonunu kullanır. Event key üzerinde delivery UUID kullanılmaması aynı provider durumunun farklı delivery'lerle tekrar bildirim üretmesini önler. Farklı payload şekilleri veya aynı timestamp'li değişikliklerin tam nedensellik çözümü PoC sınırıdır. Check/review ile PR bağlantısı task linkleri ve head commit SHA üzerinden kurulur.
+GitHub senkronizasyonu webhook ve resync arasında ortak ingest fonksiyonunu kullanır. Zaman damgaları geçerli ISO tarihleri için zaman dilimleri dikkate alınarak karşılaştırılır; aynı timestamp'li çelişkili değişikliklerin tam nedensellik çözümü PoC sınırıdır. Commit olayları SHA/görev bazında tekilleştirilir. Açık PR'ın içerik güncellemesi `pr.updated` üretir; tekrar açılış bildirimi ve açılış automation'ı üretmez.
+
+Dış kayıt değişmese bile görev ilişkileri yeniden değerlendirilir. Yeni bir commit/PR bağlantısından sonra aynı projenin kayıtlı PR, check ve review nesneleri taranır; PR bağlantıları review'lardan önce tamamlanır. Yalnızca yeni bulunan görev ilişkileri için nesnenin en güncel durumuna ait görev eventi üretilir. Eski webhook verisi saklanan yeni durumu değiştiremez. Kuyrukta bekleyen PR olayları güncel PR yaşam döngüsüyle karşılaştırılır; eski CI sonuçları da güncel snapshot karşısında kontrol edilir. Geçersizleşmiş olaylar geçmişte kalır ancak durum/yorum automation'ı uygulamaz. Yeni PR başlığı gibi yaşam döngüsünü değiştirmeyen güncellemeler bekleyen açılış/merge automation'ını engellemez.
+
+İlişki onarımı mevcut tablo ve API'leri kullanır, şema değişikliği gerektirmez. Tarama proje kapsamındadır ve silinmiş görevleri dışlar. PoC hacminde proje nesneleri taranır; büyük hacimlerde SHA/PR bağımlılık indeksiyle daraltılmalıdır.
 
 API idempotency senkron yerel route'larda uygulanır. OAuth callback, repository doğrulaması ve GitHub outbound aksiyonları async route olduğundan bu garantiye dahil değildir. Silinen görev için eski idempotent create yanıtı dönmesi standart retry semantiğidir; yeni oluşturma için yeni key kullanın.
 

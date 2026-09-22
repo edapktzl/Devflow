@@ -24,14 +24,22 @@ try{
  await call('Runtime.enable');await call('Page.enable');await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
  const evaluate=async expression=>{const result=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
  async function until(expression){for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Timed out: '+expression+'; '+await evaluate('document.body.innerText'));}
- console.log('Debugger attached');await call('Page.navigate',{url:origin});await until("!!document.querySelector('#authForm')");console.log('UI loaded');
+ console.log('Debugger attached');await call('Page.navigate',{url:origin});await until("typeof document.querySelector('#authForm')?.onsubmit === 'function'");console.log('UI loaded');
  await evaluate(`(()=>{const f=document.querySelector('#authForm');f.elements.email.value='browser@test.dev';f.elements.password.value='browser-password-123';f.elements.name.value='browser';f.querySelector('[value=register]').click();})()`);
  await until("document.querySelector('#notice').textContent.includes('oluşturuldu')");
  await evaluate("document.querySelector('#authForm [value=login]').click()");await until("!document.querySelector('#workspace').hidden");console.log('Registered and logged in');
  await evaluate("window.prompt=()=> 'Browser organization';document.querySelector('#newOrg').click()");await until("document.querySelector('#org').options.length===1");
  await evaluate("window.prompt=()=> 'Browser project';document.querySelector('#newProject').click()");await until("document.querySelectorAll('.column').length===5");console.log('Organization and project created');
- await evaluate("document.querySelector('[data-tab=settings]').click()");await until("document.querySelector('#teamPanel') && !document.querySelector('#settings').hidden && document.querySelector('#teamMembers').options.length===1");
- await evaluate(`(()=>{const f=document.querySelector('#teamForm');f.elements.name.value='Browser team';f.elements.members.options[0].selected=true;f.requestSubmit();})()`);await until("document.querySelector('#teams').textContent.includes('Browser team') && document.querySelector('#teams').textContent.includes('browser')");console.log('Team created and member listed');
+ await evaluate("document.querySelector('[data-tab=settings]').click()");await until("document.querySelector('#teamPanel') && !document.querySelector('#settings').hidden && document.querySelectorAll('#teamMembers input').length===1");
+ await evaluate(`(()=>{const f=document.querySelector('#teamForm');f.elements.name.value='Browser team';document.querySelector('#teamMembers input').checked=true;f.requestSubmit();})()`);await until("document.querySelector('#teams').textContent.includes('Browser team') && document.querySelector('#teams').textContent.includes('browser')");console.log('Team created and member listed');
+ await evaluate("document.querySelector('[data-remove-member]').click()");await until("!!document.querySelector('[data-add-member]')");
+ await evaluate("const add=document.querySelector('[data-add-member]');add.elements.member.selectedIndex=1;add.requestSubmit()");await until("!!document.querySelector('[data-remove-member]')");
+ await call('Page.reload');await until("!document.querySelector('#workspace').hidden && document.querySelectorAll('.column').length===5");
+ await evaluate("document.querySelector('[data-tab=settings]').click()");await until("!!document.querySelector('[data-remove-member]')");
+ await evaluate("window.confirm=()=>false;document.querySelector('[data-delete-team]').click()");
+ assert.ok(await evaluate("!!document.querySelector('[data-team]')"),'Cancel preserves team');
+ await evaluate("window.confirm=()=>true;document.querySelector('[data-delete-team]').click()");await until("!document.querySelector('[data-team]')");
+ console.log('Team member removed, re-added, persisted after reload and team deleted');
  await evaluate("document.querySelector('[data-tab=board]').click()");await until("!document.querySelector('#board').hidden");
  await evaluate("document.querySelector('#newTask').click()");await until("document.querySelector('#taskDialog').open");
  await evaluate(`(()=>{const f=document.querySelector('#taskForm');f.elements.title.value='Login validation';f.elements.assignee.selectedIndex=1;f.elements.labels.value='bug, auth';f.requestSubmit();})()`);

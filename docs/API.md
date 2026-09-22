@@ -17,6 +17,9 @@ Runtime liste: `GET /api/endpoints`. Başarılı JSON route'ları 200 döner. Ha
 | GET, POST | `/organizations` | Üye olunan org'lar / `{name}` ile oluştur |
 | GET, POST | `/organizations/:org/members` | Üyeler / `{email,role}` |
 | GET, POST | `/organizations/:org/teams` | Takımlar / `{name,members:[userId]}` |
+| DELETE | `/organizations/:org/teams/:team` | Owner/Admin: takımı ve takım üyeliklerini sil; kullanıcı hesapları korunur |
+| PUT | `/organizations/:org/teams/:team/members/:member` | Owner/Admin: organizasyon üyesini takıma ekle; tekrar ekleme çoğaltmaz |
+| DELETE | `/organizations/:org/teams/:team/members/:member` | Owner/Admin: yalnızca takım üyeliğini kaldır |
 | GET, POST | `/organizations/:org/projects` | Projeler / `{name}` |
 | PATCH | `/projects/:pid` | Admin: `{repo,slack_channel}` eşlemesi; null ile kaldır |
 | DELETE | `/projects/:pid` | Admin: soft delete |
@@ -43,6 +46,7 @@ Runtime liste: `GET /api/endpoints`. Başarılı JSON route'ları 200 döner. Ha
 | DELETE | `/organizations/:org/integrations/:provider` | Admin: yerel bağlantıyı sil; provider'da revoke ayrıca |
 | POST | `/organizations/:org/oauth/:provider` | Admin: github/slack OAuth URL'si oluştur |
 | POST | `/organizations/:org/slack/identities` | Admin: `{user_id,slack_user_id}` |
+| GET | `/organizations/:org/slack/identities` | Kullanıcının seçili organizasyondaki Slack eşlemeleri |
 | GET | `/organizations/:org/github/repositories` | Canlı API'den erişilebilir repo'lar |
 | GET | `/projects/:pid/github/objects` | Yerel branch, commit, issue, PR, review, check, release |
 | POST | `/projects/:pid/github/resync` | Admin: kalıcı resync job oluştur |

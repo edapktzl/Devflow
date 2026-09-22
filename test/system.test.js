@@ -17,6 +17,48 @@ async function drain(){let n=0;while(await tick()){if(++n>100)throw Error('Queue
 async function user(email,name){await api('/auth/register','POST',{email,name,password:'long-password-123'},'');return api('/auth/login','POST',{email,password:'long-password-123'},'');}
 before(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${server.address().port}`;owner=(await user('owner@test.dev','owner')).token;outsider=(await user('outside@test.dev','outside')).token;viewer=(await user('viewer@test.dev','viewer')).token;org=(await api('/organizations','POST',{name:'Engineering'})).id;pid=(await api(`/organizations/${org}/projects`,'POST',{name:'DevFlow'})).id;columns=(await api(`/projects/${pid}/board`)).columns;await api(`/organizations/${org}/members`,'POST',{email:'viewer@test.dev',role:'Viewer'});tid=(await api(`/projects/${pid}/tasks`,'POST',{title:'Login validation',assignee:(await api('/me')).id})).id;});
 after(()=>new Promise(r=>{server.closeAllConnections();server.close(r);}));
+test('team membership changes and deletion preserve accounts and enforce tenant and role boundaries',async()=>{
+ const ownerId=(await api('/me')).id,viewerId=(await api('/me','GET',undefined,viewer)).id;
+ const outsiderId=(await api('/me','GET',undefined,outsider)).id;
+ const admin=(await user('team-admin@test.dev','team-admin')).token;
+ const member=(await user('team-member@test.dev','team-member')).token;
+ await api(`/organizations/${org}/members`,'POST',{email:'team-admin@test.dev',role:'Admin'});
+ await api(`/organizations/${org}/members`,'POST',{email:'team-member@test.dev',role:'Member'});
+ const {id:team}=await api(`/organizations/${org}/teams`,'POST',{name:'Lifecycle',members:[ownerId,ownerId]});
+ const path=`/organizations/${org}/teams/${team}`;
+ const otherOrg=(await api('/organizations','POST',{name:'Other tenant'},outsider)).id;
+ for(const token of [viewer,member,outsider]){
+  assert.equal((await request(`/api${path}/members/${viewerId}`,'PUT',{},token)).status,403);
+  assert.equal((await request(`/api${path}/members/${ownerId}`,'DELETE',{},token)).status,403);
+  assert.equal((await request(`/api${path}`,'DELETE',{},token)).status,403);
+ }
+ for(const [suffix,method] of [[`/members/${outsiderId}`,'PUT'],[`/members/${ownerId}`,'DELETE'],['','DELETE']]){
+  assert.equal((await request(`/api/organizations/${otherOrg}/teams/${team}${suffix}`,method,{},outsider)).status,404);
+ }
+ assert.equal((await request(`/api${path}/members/${outsiderId}`,'PUT',{})).status,400);
+ await api(`${path}/members/${viewerId}`,'PUT',{},admin);
+ await api(`${path}/members/${viewerId}`,'PUT',{},admin);
+ const saved=(await api(`/organizations/${org}/teams`)).find(t=>t.id===team);
+ assert.deepEqual(new Set(saved.members.map(m=>m.id)),new Set([ownerId,viewerId]));
+ assert.equal(get("SELECT count(*) AS n FROM audit WHERE action='team.member_added' AND json_extract(payload,'$.id')=?",team).n,1);
+ await api(`${path}/members/${viewerId}`,'DELETE',{},admin);
+ assert.equal((await api(`/organizations/${org}/teams`)).find(t=>t.id===team).members.length,1);
+ await api(path,'DELETE',{},admin);
+ assert.ok(!(await api(`/organizations/${org}/teams`)).some(t=>t.id===team));
+ assert.equal(get('SELECT count(*) AS n FROM team_members WHERE team_id=?',team).n,0);
+ assert.ok(get('SELECT 1 FROM users WHERE id=?',ownerId));
+ assert.ok((await api(`/organizations/${org}/members`)).some(m=>m.id===viewerId));
+ assert.equal((await request(`/api${path}/members/${ownerId}`,'PUT',{})).status,404);
+ assert.ok(get("SELECT 1 FROM audit WHERE action='team.deleted' AND json_extract(payload,'$.id')=?",team));
+});
+test('invalid team membership rolls back the whole team creation',async()=>{
+ const before=get('SELECT count(*) AS n FROM teams WHERE org_id=?',org).n;
+ const ownerId=(await api('/me')).id,outsiderId=(await api('/me','GET',undefined,outsider)).id;
+ for(const members of ['invalid',[null],[''],[ownerId,outsiderId]]){
+  assert.equal((await request(`/api/organizations/${org}/teams`,'POST',{name:'Invalid',members})).status,400);
+ }
+ assert.equal(get('SELECT count(*) AS n FROM teams WHERE org_id=?',org).n,before);
+});
 test('login, organization, board and tenant boundaries',async()=>{assert.equal((await request(`/api/projects/${pid}/board`,'GET',undefined,outsider)).status,403);assert.equal((await request(`/api/tasks/${tid}`,'GET',undefined,outsider)).status,403);assert.equal((await request(`/api/projects/${pid}/tasks`,'POST',{title:'forbidden'},viewer)).status,403);assert.equal((await request('/api/me','GET',undefined,'')).status,401);assert.equal((await api(`/projects/${pid}/board`, 'GET',undefined,viewer)).columns.length,5);});
 test('organization teams list assigned members and enforce organization roles',async()=>{const ownerId=(await api('/me')).id;const created=await api(`/organizations/${org}/teams`,'POST',{name:'Platform',members:[ownerId]});const teams=await api(`/organizations/${org}/teams`);assert.deepEqual(teams.find(team=>team.id===created.id),{id:created.id,org_id:org,name:'Platform',members:[{id:ownerId,name:'owner'}]});assert.equal((await request(`/api/organizations/${org}/teams`,'GET',undefined,outsider)).status,403);assert.equal((await request(`/api/organizations/${org}/teams`,'POST',{name:'Forbidden'},viewer)).status,403);});
 test('task validation, idempotency and optimistic concurrency',async()=>{const payload={title:'Idempotent task'};const headers={'Idempotency-Key':'create-once'};const a=await api(`/projects/${pid}/tasks`,'POST',payload,owner,headers);const b=await api(`/projects/${pid}/tasks`,'POST',payload,owner,headers);assert.equal(a.id,b.id);assert.equal((await request(`/api/projects/${pid}/tasks`,'POST',{title:'Different'},owner,headers)).status,409);const t=await api(`/tasks/${tid}`);await api(`/tasks/${tid}`,'PATCH',{version:t.version,description:'Updated'});assert.equal((await request(`/api/tasks/${tid}`,'PATCH',{version:t.version,title:'Stale'})).status,409);assert.equal((await request(`/api/projects/${pid}/tasks`,'POST',{title:'Bad',assignee:(await api('/me','GET',undefined,outsider)).id})).status,400);});
@@ -56,5 +98,22 @@ test('Slack outbound failure remains durable, then sends interactive message on 
  const original=globalThis.fetch;let attempts=0;
  try{globalThis.fetch=async(url,options)=>{assert.equal(url,'https://slack.com/api/chat.postMessage');assert.equal(options.headers.Authorization,'Bearer slack-adapter-token');const payload=JSON.parse(options.body);assert.equal(payload.channel,'C123');assert.ok(payload.blocks[1].elements.some(action=>action.action_id==='assign'));assert.ok(payload.blocks[1].elements.some(action=>action.action_id==='approve'));if(++attempts===1)return new Response(JSON.stringify({ok:false,error:'ratelimited'}),{status:429,headers:{'Retry-After':'1'}});return new Response(JSON.stringify({ok:true,ts:'123.123'}));};await tick();assert.equal(get("SELECT status FROM jobs WHERE job_key='outbound-fixture'").status,'pending');run("UPDATE jobs SET available_at=0 WHERE job_key='outbound-fixture'");await tick();assert.equal(get("SELECT status FROM jobs WHERE job_key='outbound-fixture'").status,'done');assert.equal(attempts,2);}finally{globalThis.fetch=original;run('DELETE FROM integrations WHERE org_id=? AND provider=?',org,'slack');}
 });
-test('frontend assets are served with security headers',async()=>{for(const path of ['/','/app.js','/style.css']){const response=await fetch(base+path);assert.equal(response.status,200);assert.equal(response.headers.get('x-content-type-options'),'nosniff');assert.ok((await response.text()).length>100);}});
+test('frontend assets and their module imports are served without authentication',async()=>{
+ const pending=['/','/app.js','/style.css'],visited=new Set();
+ for(const path of pending){
+  if(visited.has(path))continue;
+  visited.add(path);
+  const response=await fetch(base+path);
+  assert.equal(response.status,200,`Frontend asset unavailable: ${path}`);
+  assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+  const source=await response.text();
+  assert.ok(source.length>100);
+  if(path.endsWith('.js')){
+   assert.match(response.headers.get('content-type'),/application\/javascript/);
+   for(const match of source.matchAll(/\bimport\s+(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/g)){
+    pending.push(new URL(match[1],base+path).pathname);
+   }
+  }
+ }
+});
 test('deadline scheduling dedup, token encryption and soft deletion',async()=>{const t=await api(`/projects/${pid}/tasks`,'POST',{title:'Overdue',due_date:'2020-01-01'});schedule();schedule();assert.equal(get('SELECT count(*) AS n FROM events WHERE task_id=? AND type=?',t.id,'task.deadline').n,1);const secret='my-secret';assert.notEqual(crypt(secret),secret);assert.equal(crypt(crypt(secret),true),secret);await api(`/tasks/${t.id}`,'DELETE',{version:t.version});assert.equal((await request(`/api/tasks/${t.id}`)).status,404);assert.ok(get('SELECT deleted_at FROM tasks WHERE id=?',t.id).deleted_at);});
