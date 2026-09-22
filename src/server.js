@@ -27,7 +27,32 @@ route('POST','/api/organizations',({user,b})=>{const oid=id();run('INSERT INTO o
 route('GET','/api/organizations/:org/members',({user,p})=>{access(user,p.org);return all('SELECT u.id,u.name,u.email,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE org_id=?',p.org);});
 route('POST','/api/organizations/:org/members',({user,p,b})=>{const role=b.role||'Member';const caller=access(user,p.org,true,true);if(!['Admin','Member','Viewer'].includes(role)||role==='Admin'&&caller.role!=='Owner')fail(403,'Invalid role grant');const u=get('SELECT id FROM users WHERE email=?',required(b.email).toLowerCase());if(!u)fail(404,'User must register first');if(get('SELECT role FROM members WHERE org_id=? AND user_id=?',p.org,u.id)?.role==='Owner')fail(403,'Cannot change owner');run('INSERT INTO members VALUES(?,?,?) ON CONFLICT(org_id,user_id) DO UPDATE SET role=excluded.role',p.org,u.id,role);audit(p.org,user,'membership.updated',{user_id:u.id,role});return {ok:true};});
 route('GET','/api/organizations/:org/teams',({user,p})=>{access(user,p.org);return all('SELECT * FROM teams WHERE org_id=?',p.org).map(team=>({...team,members:all('SELECT u.id,u.name FROM team_members tm JOIN users u ON u.id=tm.user_id WHERE tm.team_id=? ORDER BY u.name',team.id)}));});
-route('POST','/api/organizations/:org/teams',({user,p,b})=>{access(user,p.org,true,true);const tid=id();run('INSERT INTO teams VALUES(?,?,?)',tid,p.org,required(b.name));for(const uid of b.members||[]){checkedAssignee(p.org,uid);run('INSERT INTO team_members VALUES(?,?)',tid,uid);}audit(p.org,user,'team.created',{id:tid});return {id:tid};});
+route('POST','/api/organizations/:org/teams',({user,p,b})=>{access(user,p.org,true,true);const members=b.members??[];if(!Array.isArray(members)||members.some(uid=>typeof uid!=='string'||!uid.trim()))fail(400,'Invalid team members');const tid=id();run('INSERT INTO teams VALUES(?,?,?)',tid,p.org,required(b.name));for(const uid of new Set(members)){checkedAssignee(p.org,uid);run('INSERT INTO team_members VALUES(?,?)',tid,uid);}audit(p.org,user,'team.created',{id:tid});return {id:tid};});
+function managedTeam(user,p){
+ access(user,p.org,true,true);
+ const team=get('SELECT * FROM teams WHERE id=? AND org_id=?',p.team,p.org);
+ if(!team)fail(404,'Team not found');
+ return team;
+}
+route('PUT','/api/organizations/:org/teams/:team/members/:member',({user,p})=>{
+ managedTeam(user,p);checkedAssignee(p.org,p.member);
+ const result=run('INSERT OR IGNORE INTO team_members VALUES(?,?)',p.team,p.member);
+ if(result.changes)audit(p.org,user,'team.member_added',{id:p.team,user_id:p.member});
+ return {ok:true};
+});
+route('DELETE','/api/organizations/:org/teams/:team/members/:member',({user,p})=>{
+ managedTeam(user,p);
+ const result=run('DELETE FROM team_members WHERE team_id=? AND user_id=?',p.team,p.member);
+ if(result.changes)audit(p.org,user,'team.member_removed',{id:p.team,user_id:p.member});
+ return {ok:true};
+});
+route('DELETE','/api/organizations/:org/teams/:team',({user,p})=>{
+ const team=managedTeam(user,p);
+ run('DELETE FROM team_members WHERE team_id=?',team.id);
+ run('DELETE FROM teams WHERE id=?',team.id);
+ audit(p.org,user,'team.deleted',{id:team.id,name:team.name});
+ return {ok:true};
+});
 route('GET','/api/organizations/:org/projects',({user,p})=>{access(user,p.org);return all('SELECT * FROM projects WHERE org_id=? AND deleted_at IS NULL',p.org);});
 route('POST','/api/organizations/:org/projects',({user,p,b})=>{access(user,p.org,true);const pid=id(),bid=id();run('INSERT INTO projects(id,org_id,name) VALUES(?,?,?)',pid,p.org,required(b.name));run('INSERT INTO boards VALUES(?,?,?)',bid,pid,'Main board');['Backlog','Todo','In Progress','Review','Done'].forEach((name,i)=>run('INSERT INTO columns VALUES(?,?,?,?)',id(),bid,name,i));for(const [trigger,condition,action,value] of [['pr.opened',null,'set_status','Review'],['pr.merged','Review','set_status','Done'],['pr.merged','In Progress','set_status','Done'],['ci.failed',null,'comment','GitHub CI failed. Inspect the linked check.']])run('INSERT INTO rules(id,project_id,trigger,condition_status,action,value) VALUES(?,?,?,?,?,?)',id(),pid,trigger,condition,action,value);emit(pid,'project.created',{},null,user);return {id:pid,board_id:bid};});
 route('PATCH','/api/projects/:pid',async({user,p,b})=>{const pr=project(user,p.pid,true,true);if(b.repo!==undefined&&b.repo!==null){if(!/^[\w.-]+\/[\w.-]+$/.test(b.repo))fail(400,'Expected owner/repository');const repo=await external('github',pr.org_id,`/repos/${b.repo}`);b.repo=required(repo.full_name,'GitHub repository name');}if(b.slack_channel!==undefined&&b.slack_channel!==null&&!/^[CG][A-Z0-9]+$/.test(b.slack_channel))fail(400,'Invalid channel ID');tx(()=>{const current=project(user,p.pid,true,true);run('UPDATE projects SET repo=?,slack_channel=? WHERE id=?',b.repo===undefined?current.repo:b.repo,b.slack_channel===undefined?current.slack_channel:b.slack_channel,pr.id);audit(pr.org_id,user,'project.integrations_updated',{repo:b.repo,slack_channel:b.slack_channel});if(b.repo)enqueue(`resync:${id()}`,'resync',{project_id:pr.id});});return {ok:true};},{async:true});
