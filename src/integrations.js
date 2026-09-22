@@ -1,4 +1,5 @@
 import {all,get,run,tx,id,now,crypt,fail,enqueue,emit,move,mentions,access} from './core.js';
+import {slackNotification,githubUrl} from './slack-notifications.js';
 export async function external(provider,org,path,method='GET',body){
  const integration=get('SELECT * FROM integrations WHERE org_id=? AND provider=?',org,provider);if(!integration)fail(409,`${provider} is not connected`);
  const url=provider==='github'?`https://api.github.com${path}`:`https://slack.com/api/${path}`;
@@ -22,11 +23,16 @@ export function ingest(pid,kind,obj,overrideType){
  // A merged PR is terminal even if an old delivery has the same timestamp.
  if(previous&&kind==='pr'&&JSON.parse(previous.payload).merged&&!obj.merged)return;
  run('INSERT INTO external_objects VALUES(?,?,?,?,?) ON CONFLICT(project_id,kind,external_id) DO UPDATE SET updated_at=excluded.updated_at,payload=excluded.payload',pid,kind,eid,stamp,JSON.stringify(obj));
- const type=overrideType||(kind==='pr'?(obj.merged?'pr.merged':obj.state==='open'?'pr.opened':'pr.closed'):kind==='check'?(obj.conclusion==='failure'?'ci.failed':'ci.updated'):`${kind}.updated`);
+ const old=previous?JSON.parse(previous.payload):null;
+ const samePrState=kind==='pr'&&old&&old.state===obj.state&&!!old.merged===!!obj.merged;
+ const type=overrideType||(kind==='pr'?(samePrState?'pr.updated':obj.merged?'pr.merged':obj.state==='open'?'pr.opened':'pr.closed'):kind==='check'?(obj.conclusion==='failure'?'ci.failed':'ci.updated'):`${kind}.updated`);
+ const payload={kind,external_id:eid,url:obj.html_url||obj.url,title:obj.title||obj.message||obj.name||obj.tag_name,author:obj.user?.login||obj.author?.name||obj.commit?.author?.name,state:obj.state,conclusion:obj.conclusion,branch:obj.head?.ref||obj.ref};
+ // A commit SHA identifies immutable content, regardless of webhook/API shape or timestamp format.
+ const eventStamp=kind==='commit'?'immutable':stamp;
  let tids=references(p,obj);
  if(!tids.length&&kind==='review')tids=all('SELECT l.task_id FROM task_links l JOIN tasks t ON t.id=l.task_id WHERE t.project_id=? AND l.kind=? AND l.external_id=? AND t.deleted_at IS NULL',pid,'pr',String(obj.pull_request_number)).map(x=>x.task_id);
- for(const tid of tids){run('INSERT OR IGNORE INTO task_links VALUES(?,?,?,?)',tid,kind,eid,obj.html_url||obj.url||null);emit(pid,type,{kind,external_id:eid,url:obj.html_url||obj.url,state:obj.state,conclusion:obj.conclusion},tid,null,'github',`github:${pid}:${kind}:${eid}:${stamp}:${type}:${tid}`);}
- if(!tids.length)emit(pid,type,{kind,external_id:eid},null,null,'github',`github:${pid}:${kind}:${eid}:${stamp}:${type}`);
+ for(const tid of tids){run('INSERT OR IGNORE INTO task_links VALUES(?,?,?,?)',tid,kind,eid,obj.html_url||obj.url||null);if(kind!=='commit'||!get("SELECT 1 FROM events WHERE project_id=? AND task_id=? AND type='commit.updated' AND json_extract(payload,'$.external_id')=?",pid,tid,eid))emit(pid,type,payload,tid,null,'github',`github:${pid}:${kind}:${eid}:${eventStamp}:${type}:${tid}`);}
+ if(!tids.length&&(kind!=='commit'||!get("SELECT 1 FROM events WHERE project_id=? AND type='commit.updated' AND json_extract(payload,'$.external_id')=?",pid,eid)))emit(pid,type,payload,null,null,'github',`github:${pid}:${kind}:${eid}:${eventStamp}:${type}`);
 }
 export function githubDelivery(data){
  const p=get('SELECT * FROM projects WHERE repo=? AND deleted_at IS NULL',data.body.repository?.full_name||'');if(!p)return;
@@ -58,8 +64,9 @@ export function processEvent(eid){
  const t=e.task_id?get('SELECT t.*,c.name AS status FROM tasks t JOIN columns c ON c.id=t.column_id WHERE t.id=? AND t.deleted_at IS NULL',e.task_id):null;
  const users=new Set([t?.assignee,...(payload.mentions?.users||[])]);if(e.type==='task.comment'&&t)for(const c of all('SELECT DISTINCT user_id FROM comments WHERE task_id=?',t.id))users.add(c.user_id);
  for(const uid of users)if(uid&&get('SELECT 1 FROM members WHERE org_id=? AND user_id=?',p.org_id,uid))run('INSERT OR IGNORE INTO notifications(id,event_id,user_id) VALUES(?,?,?)',id(),eid,uid);
- const slack=(text)=>{if(p.slack_channel&&get('SELECT 1 FROM integrations WHERE org_id=? AND provider=?',p.org_id,'slack'))enqueue(`slack:${eid}`,'slack',{project_id:p.id,task_id:t?.id||null,text});};
- slack(`${e.type}${t?` · TASK-${t.id} ${t.title}`:''}`);
+ const notification=slackNotification(e,payload,p,t);
+ const slack=(text,url)=>{if(p.slack_channel&&get('SELECT 1 FROM integrations WHERE org_id=? AND provider=?',p.org_id,'slack'))enqueue(`slack:${eid}`,'slack',{project_id:p.id,task_id:t?.id||null,text,url});};
+ if(notification)slack(notification.text,notification.url);
  for(const r of all('SELECT * FROM rules WHERE project_id=? AND trigger=? AND enabled=1',p.id,e.type)){
  if(r.condition_status&&t?.status!==r.condition_status)continue;
  if(r.action==='set_status'&&t&&e.source!=='automation'){
@@ -72,6 +79,7 @@ export function processEvent(eid){
 }
 export async function sendSlack(data){const p=get('SELECT * FROM projects WHERE id=? AND deleted_at IS NULL',data.project_id);if(!p?.slack_channel)return;
  const blocks=[{type:'section',text:{type:'plain_text',text:data.text.slice(0,2900)}}];
+ if(githubUrl(data.url))blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'GitHub’da aç'},url:data.url}]});
  if(data.task_id)blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'Approve'},action_id:'approve',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Reject'},style:'danger',action_id:'reject',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Assign to Me'},action_id:'assign',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Open Task'},url:`${process.env.PUBLIC_URL||'http://localhost:3000'}/?task=${data.task_id}`} ]});
  await external('slack',p.org_id,'chat.postMessage','POST',{channel:p.slack_channel,text:data.text,blocks});
 }
