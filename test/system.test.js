@@ -56,5 +56,22 @@ test('Slack outbound failure remains durable, then sends interactive message on 
  const original=globalThis.fetch;let attempts=0;
  try{globalThis.fetch=async(url,options)=>{assert.equal(url,'https://slack.com/api/chat.postMessage');assert.equal(options.headers.Authorization,'Bearer slack-adapter-token');const payload=JSON.parse(options.body);assert.equal(payload.channel,'C123');assert.ok(payload.blocks[1].elements.some(action=>action.action_id==='assign'));assert.ok(payload.blocks[1].elements.some(action=>action.action_id==='approve'));if(++attempts===1)return new Response(JSON.stringify({ok:false,error:'ratelimited'}),{status:429,headers:{'Retry-After':'1'}});return new Response(JSON.stringify({ok:true,ts:'123.123'}));};await tick();assert.equal(get("SELECT status FROM jobs WHERE job_key='outbound-fixture'").status,'pending');run("UPDATE jobs SET available_at=0 WHERE job_key='outbound-fixture'");await tick();assert.equal(get("SELECT status FROM jobs WHERE job_key='outbound-fixture'").status,'done');assert.equal(attempts,2);}finally{globalThis.fetch=original;run('DELETE FROM integrations WHERE org_id=? AND provider=?',org,'slack');}
 });
-test('frontend assets are served with security headers',async()=>{for(const path of ['/','/app.js','/style.css']){const response=await fetch(base+path);assert.equal(response.status,200);assert.equal(response.headers.get('x-content-type-options'),'nosniff');assert.ok((await response.text()).length>100);}});
+test('frontend assets and their module imports are served without authentication',async()=>{
+ const pending=['/','/app.js','/style.css'],visited=new Set();
+ for(const path of pending){
+  if(visited.has(path))continue;
+  visited.add(path);
+  const response=await fetch(base+path);
+  assert.equal(response.status,200,`Frontend asset unavailable: ${path}`);
+  assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+  const source=await response.text();
+  assert.ok(source.length>100);
+  if(path.endsWith('.js')){
+   assert.match(response.headers.get('content-type'),/application\/javascript/);
+   for(const match of source.matchAll(/\bimport\s+(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/g)){
+    pending.push(new URL(match[1],base+path).pathname);
+   }
+  }
+ }
+});
 test('deadline scheduling dedup, token encryption and soft deletion',async()=>{const t=await api(`/projects/${pid}/tasks`,'POST',{title:'Overdue',due_date:'2020-01-01'});schedule();schedule();assert.equal(get('SELECT count(*) AS n FROM events WHERE task_id=? AND type=?',t.id,'task.deadline').n,1);const secret='my-secret';assert.notEqual(crypt(secret),secret);assert.equal(crypt(crypt(secret),true),secret);await api(`/tasks/${t.id}`,'DELETE',{version:t.version});assert.equal((await request(`/api/tasks/${t.id}`)).status,404);assert.ok(get('SELECT deleted_at FROM tasks WHERE id=?',t.id).deleted_at);});
