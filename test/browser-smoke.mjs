@@ -30,6 +30,9 @@ try{
  await evaluate("document.querySelector('#authForm [value=login]').click()");await until("!document.querySelector('#workspace').hidden");console.log('Registered and logged in');
  await evaluate("window.prompt=()=> 'Browser organization';document.querySelector('#newOrg').click()");await until("document.querySelector('#org').options.length===1");
  await evaluate("window.prompt=()=> 'Browser project';document.querySelector('#newProject').click()");await until("document.querySelectorAll('.column').length===5");console.log('Organization and project created');
+ await evaluate("document.querySelector('[data-tab=settings]').click()");await until("document.querySelector('#teamPanel') && !document.querySelector('#settings').hidden && document.querySelector('#teamMembers').options.length===1");
+ await evaluate(`(()=>{const f=document.querySelector('#teamForm');f.elements.name.value='Browser team';f.elements.members.options[0].selected=true;f.requestSubmit();})()`);await until("document.querySelector('#teams').textContent.includes('Browser team') && document.querySelector('#teams').textContent.includes('browser')");console.log('Team created and member listed');
+ await evaluate("document.querySelector('[data-tab=board]').click()");await until("!document.querySelector('#board').hidden");
  await evaluate("document.querySelector('#newTask').click()");await until("document.querySelector('#taskDialog').open");
  await evaluate(`(()=>{const f=document.querySelector('#taskForm');f.elements.title.value='Login validation';f.elements.assignee.selectedIndex=1;f.elements.labels.value='bug, auth';f.requestSubmit();})()`);
  await until("document.querySelectorAll('.card').length===1 && !document.querySelector('#taskDialog').open");
