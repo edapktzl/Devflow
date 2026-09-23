@@ -6,7 +6,26 @@ async function api(path,method='GET',body){const r=await fetch('/api'+path,{meth
 const safe=fn=>async(...args)=>{try{await fn(...args);}catch(e){notice(e.message,true);}};
 function options(el,items,value='id',label='name'){el.innerHTML=items.map(i=>`<option value="${esc(i[value])}">${esc(i[label])}</option>`).join('');}
 const teamManager=createTeamManager({api,esc,safe,getOrg:()=>org,getMembers:()=>members,getUserId:()=>me?.id,notice,refreshSettings:()=>settings()});
-$('#authForm').onsubmit=safe(async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));if(e.submitter.value==='register'){await api('/auth/register','POST',b);notice('Hesabınız oluşturuldu. Giriş yapabilirsiniz.');return;}const data=await api('/auth/login','POST',b);token=data.token;sessionStorage.setItem('devflow-token',token);await start();});
+function authView(register){
+ $('#authForm').hidden=register;$('#registerForm').hidden=!register;
+ $('#registerNotice').hidden=true;notice('');
+ $('#authForm').elements.password.value='';$('#registerForm').elements.password.value='';
+ (register?$('#registerForm').elements.name:$('#authForm').elements.email).focus();
+}
+$('#showRegister').onclick=()=>{const email=$('#authForm').elements.email.value;$('#registerForm').reset();$('#registerForm').elements.email.value=email;authView(true);};
+$('#backToLogin').onclick=()=>authView(false);
+$('#registerForm').onsubmit=async event=>{
+ event.preventDefault();const form=event.target,submit=$('#registerSubmit'),back=$('#backToLogin');
+ if(submit.disabled)return;
+ const body=Object.fromEntries(new FormData(form));submit.disabled=true;back.disabled=true;submit.textContent='Kaydediliyor…';$('#registerNotice').hidden=true;
+ try{
+  const account=await api('/auth/register','POST',body);
+  form.reset();$('#authForm').elements.email.value=account.email;authView(false);
+  notice('Hesabınız oluşturuldu. Şifrenizi girerek giriş yapabilirsiniz.');$('#authForm').elements.password.focus();
+ }catch(error){const box=$('#registerNotice');box.textContent=error.message;box.className='error';box.hidden=false;}
+ finally{submit.disabled=false;back.disabled=false;submit.textContent='Kaydı tamamla';}
+};
+$('#authForm').onsubmit=safe(async e=>{e.preventDefault();const data=await api('/auth/login','POST',Object.fromEntries(new FormData(e.target)));token=data.token;sessionStorage.setItem('devflow-token',token);await start();});
 $('#logout').onclick=safe(async()=>{await api('/auth/logout','POST',{});sessionStorage.removeItem('devflow-token');location.reload();});
 async function start(){if(!token)return;me=await api('/me');$('#identity').textContent='@'+me.name;$('#auth').hidden=true;$('#workspace').hidden=false;const query=new URLSearchParams(location.search);const integration=query.get('integration');if(integration&&query.get('status')==='connected'){notice(`${integration==='slack'?'Slack':'GitHub'} bağlantısı başarıyla tamamlandı.`);history.replaceState({},'',location.pathname);}const orgs=await api('/organizations');options($('#org'),orgs);org=$('#org').value;const deep=query.get('task');if(deep){const t=await api(`/tasks/${Number(deep)}`);for(const o of orgs){const projects=await api(`/organizations/${o.id}/projects`);if(projects.some(p=>p.id===t.project_id)){org=o.id;$('#org').value=org;preferredPid=t.project_id;break;}}}await loadOrg();}
 async function loadOrg(){streamController?.abort();if(!org){$('#kanban').innerHTML='<p class="empty">İlk organizasyonunuzu oluşturun.</p>';return;}members=await api(`/organizations/${org}/members`);const projects=await api(`/organizations/${org}/projects`);options($('#project'),projects);if(preferredPid){$('#project').value=preferredPid;preferredPid=null;}pid=$('#project').value;await loadProject();}

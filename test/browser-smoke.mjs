@@ -25,9 +25,24 @@ try{
  const evaluate=async expression=>{const result=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
  async function until(expression){for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Timed out: '+expression+'; '+await evaluate('document.body.innerText'));}
  console.log('Debugger attached');await call('Page.navigate',{url:origin});await until("typeof document.querySelector('#authForm')?.onsubmit === 'function'");console.log('UI loaded');
- await evaluate(`(()=>{const f=document.querySelector('#authForm');f.elements.email.value='browser@test.dev';f.elements.password.value='browser-password-123';f.elements.name.value='browser';f.querySelector('[value=register]').click();})()`);
- await until("document.querySelector('#notice').textContent.includes('oluşturuldu')");
- await evaluate("document.querySelector('#authForm [value=login]').click()");await until("!document.querySelector('#workspace').hidden");console.log('Registered and logged in');
+ assert.equal(await evaluate("!!document.querySelector('#authForm input[name=name]')"),false);
+ await evaluate("document.querySelector('#showRegister').click()");
+ await until("!document.querySelector('#registerForm').hidden && document.querySelector('#authForm').hidden");
+ await evaluate("document.querySelector('#backToLogin').click()");
+ assert.ok(await evaluate("document.querySelector('#registerForm').hidden && !document.querySelector('#authForm').hidden"));
+ await evaluate("document.querySelector('#showRegister').click()");
+ await evaluate("(()=>{const f=document.querySelector('#registerForm');f.elements.email.value='browser@test.dev';f.elements.password.value='browser-password-123';f.elements.name.value='browser';f.requestSubmit();})()");
+ await until("!document.querySelector('#authForm').hidden && document.querySelector('#registerForm').hidden && document.querySelector('#notice').textContent.includes('oluşturuldu')");
+ assert.equal(await evaluate("document.querySelector('#authForm').elements.email.value"),'browser@test.dev');
+ assert.equal(await evaluate("document.querySelector('#authForm').elements.password.value"),'');
+ assert.ok(await evaluate("document.querySelector('#workspace').hidden"),'Registration does not sign in automatically');
+ assert.equal(await evaluate("location.href"),origin+'/','Registration stays on the same page');
+ await evaluate("document.querySelector('#showRegister').click()");
+ await evaluate("(()=>{const f=document.querySelector('#registerForm');f.elements.email.value='browser@test.dev';f.elements.password.value='browser-password-123';f.elements.name.value='browser';f.requestSubmit();})()");
+ await until("!document.querySelector('#registerNotice').hidden && document.querySelector('#registerNotice').textContent.includes('kayıtlı')");
+ assert.equal(await evaluate("document.querySelector('#registerForm').hidden"),false);
+ await evaluate("document.querySelector('#backToLogin').click();document.querySelector('#authForm').elements.password.value='browser-password-123';document.querySelector('#authForm [value=login]').click()");
+ await until("!document.querySelector('#workspace').hidden");console.log('Separate registration card, duplicate error, return to login and sign-in verified');
  await evaluate("window.prompt=()=> 'Browser organization';document.querySelector('#newOrg').click()");await until("document.querySelector('#org').options.length===1");
  await evaluate("window.prompt=()=> 'Browser project';document.querySelector('#newProject').click()");await until("document.querySelectorAll('.column').length===5");console.log('Organization and project created');
  await evaluate("document.querySelector('[data-tab=settings]').click()");await until("document.querySelector('#teamPanel') && !document.querySelector('#settings').hidden && document.querySelectorAll('#teamMembers input').length===1");

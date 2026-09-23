@@ -2,12 +2,14 @@
 
 ## Otomatik doğrulama
 
-- `npm.cmd test`: **30/30 başarılı**. Gerçek Node HTTP sunucusu ve bellek içi SQLite kullanılır; harici provider yanıtları test fixture'larıdır.
+- `npm.cmd test`: **34/34 başarılı**. Gerçek Node HTTP sunucusu ve bellek içi SQLite kullanılır; harici provider yanıtları test fixture'larıdır.
 - Kapsam: login, roller/tenant izolasyonu, takım üyeliği/silme, görevler, yorum/mention, GitHub imzası ve görev ilişkileri, Slack imzası/aksiyonları, retry/dead-letter, SSE, automation ve deadline.
 - Olay sıralaması: PR/CI/review commit'ten önce gelse de bağlantılar tamamlanır; değişmemiş resync snapshot'ları eksik ilişkileri onarır; tekrar işleme görev bildirimi ve CI yorumunu çoğaltmaz.
 - Gecikmiş olaylar: eski PR açılışı merge edilmiş görevi geri taşımaz; başarıyla sonuçlanmış check için bekleyen eski hata automation'ı çalışmaz. PR başlığı güncellemesi bekleyen geçerli açılış/merge işlemini engellemez.
 - Slack kuralları: birden fazla eşleşen özel mesaj ayrı işler oluşturur; eşleşen özel kural yoksa varsayılan bildirim kullanılır.
 - `node test/browser-smoke.mjs`: gerçek Chromium ile kayıt/giriş, organizasyon/proje, takım oluşturma/üye çıkarma-ekleme/yenileme/silme, görev/durum, sohbet/mention ve inbox akışı başarılı. Test canlı hesapları kullanmaz.
+
+- Kayıt akışı: aynı sayfada ayrı kayıt kutusu, başarılı kayıt sonrası e-posta dolu ve şifre boş giriş formuna dönüş, hatalı/tekrarlanan kayıtta hata gösterimi doğrulandı. Sunucu bozuk e-postaları ve uygunsuz kullanıcı adı/şifreleri reddeder.
 
 ## Canlı bağlantılarda doğrulananlar
 

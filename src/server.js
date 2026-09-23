@@ -13,8 +13,12 @@ function taskFields(b,p){if(b.priority&&!['low','normal','high','urgent'].includ
 route('GET','/api/health',()=>({ok:!!get('SELECT 1')}),{public:true});
 route('GET','/api/endpoints',()=>routes.map(r=>({method:r.method,path:r.path,public:!!r.public})));
 route('POST','/api/auth/register',({b})=>{
- const email=required(b.email,'email').toLowerCase(),name=required(b.name,'name');if(!/^[\w.-]{2,40}$/.test(name)||!email.includes('@')||typeof b.password!=='string'||b.password.length<10||b.password.length>200)fail(400,'Use a valid email, username and 10–200 character password');
- if(get('SELECT 1 FROM users WHERE email=? OR name=?',email,name))fail(409,'Email or username already exists');const uid=id();run('INSERT INTO users VALUES(?,?,?,?)',uid,email,name,password(b.password));return {id:uid,email,name};
+ const email=required(b.email,'e-posta').toLowerCase(),name=required(b.name,'kullanıcı adı');
+ const parts=email.split('@'),local=parts[0],domain=parts[1];
+ if(email.length>254||parts.length!==2||local.length>64||! /^[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+$/.test(local)||local.startsWith('.')||local.endsWith('.')||local.includes('..')||!domain?.includes('.')||domain.split('.').some(label=>! /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)))fail(400,'Geçerli bir e-posta adresi girin.');
+ if(!/^[\w.-]{2,40}$/.test(name))fail(400,'Kullanıcı adı 2–40 karakter olmalı; İngilizce harf, rakam, nokta, tire veya alt çizgi kullanın.');
+ if(typeof b.password!=='string'||b.password.length<10||b.password.length>200)fail(400,'Şifre 10–200 karakter arasında olmalı.');
+ if(get('SELECT 1 FROM users WHERE email=? OR name=?',email,name))fail(409,'Bu e-posta veya kullanıcı adı zaten kayıtlı.');const uid=id();run('INSERT INTO users VALUES(?,?,?,?)',uid,email,name,password(b.password));return {id:uid,email,name};
 },{public:true});
 route('POST','/api/auth/login',({b})=>{
  const u=get('SELECT * FROM users WHERE email=?',required(b.email).toLowerCase());const candidate=typeof b.password==='string'&&b.password.length<=200?b.password:'';if(!u||!verifyPassword(candidate,u.password))fail(401,'Invalid credentials');
