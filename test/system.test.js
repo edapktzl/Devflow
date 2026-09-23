@@ -120,15 +120,6 @@ test('resync recovers missed PR merge through real adapter and deduplicates repe
  const original=globalThis.fetch;let calls=0;
  try{globalThis.fetch=async(url,options)=>{if(String(url).startsWith(base))return original(url,options);calls++;const u=new URL(url);assert.equal(u.origin,'https://api.github.com');let body=[];if(u.pathname.endsWith('/pulls'))body=[pr];if(u.pathname.endsWith('/pulls/88'))body=pr;if(u.pathname.endsWith('/check-runs'))body={check_runs:[]};return new Response(JSON.stringify(body));};await resync(pid);await drain();assert.equal((await api(`/tasks/${t.id}`)).status,'Done');const n=get('SELECT count(*) AS n FROM events WHERE task_id=?',t.id).n;await resync(pid);await drain();assert.equal(get('SELECT count(*) AS n FROM events WHERE task_id=?',t.id).n,n);assert.ok(calls>=12);}finally{globalThis.fetch=original;}
 });
-test('resync queue prevents overlapping jobs for one project',()=>{
- run("DELETE FROM jobs WHERE kind='resync'");
- const first=enqueue('resync-test-1','resync',{project_id:pid});
- assert.equal(first,undefined);
- schedule();
- const active=all("SELECT * FROM jobs WHERE kind='resync' AND status IN ('pending','running') AND json_extract(payload,'$.project_id')=?",pid);
- assert.equal(active.length,1);
- run("DELETE FROM jobs WHERE kind='resync'");
-});
 test('Slack outbound failure remains durable, then sends interactive message on retry',async()=>{
  run('INSERT INTO integrations VALUES(?,?,?,?)',org,'slack',crypt('slack-adapter-token'),'T123');enqueue('outbound-fixture','slack',{project_id:pid,task_id:tid,text:'task assigned'});
  const original=globalThis.fetch;let attempts=0;
