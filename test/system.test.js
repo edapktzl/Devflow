@@ -137,6 +137,20 @@ test('Slack outbound failure remains durable, then sends interactive message on 
  const original=globalThis.fetch;let attempts=0;
  try{globalThis.fetch=async(url,options)=>{assert.equal(url,'https://slack.com/api/chat.postMessage');assert.equal(options.headers.Authorization,'Bearer slack-adapter-token');const payload=JSON.parse(options.body);assert.equal(payload.channel,'C123');assert.ok(payload.blocks[1].elements.some(action=>action.action_id==='assign'));assert.ok(payload.blocks[1].elements.some(action=>action.action_id==='approve'));if(++attempts===1)return new Response(JSON.stringify({ok:false,error:'ratelimited'}),{status:429,headers:{'Retry-After':'1'}});return new Response(JSON.stringify({ok:true,ts:'123.123'}));};await tick();assert.equal(get("SELECT status FROM jobs WHERE job_key='outbound-fixture'").status,'pending');run("UPDATE jobs SET available_at=0 WHERE job_key='outbound-fixture'");await tick();assert.equal(get("SELECT status FROM jobs WHERE job_key='outbound-fixture'").status,'done');assert.equal(attempts,2);}finally{globalThis.fetch=original;run('DELETE FROM integrations WHERE org_id=? AND provider=?',org,'slack');}
 });
+test('Slack permanent authentication errors dead-letter without retry',async()=>{
+ run('INSERT INTO integrations VALUES(?,?,?,?)',org,'slack',crypt('slack-permanent-token'),'T123');
+ enqueue('slack-permanent-error','slack',{project_id:pid,task_id:tid,text:'permanent error'});
+ enqueue('slack-http-403','slack',{project_id:pid,task_id:tid,text:'http 403'});
+ const original=globalThis.fetch;let attempts=0;
+ try{
+  globalThis.fetch=async()=>{attempts++;return attempts===1?new Response(JSON.stringify({ok:false,error:'invalid_auth'}),{status:200}):new Response(JSON.stringify({ok:false,error:'forbidden'}),{status:403});};
+  for(let i=0;i<20&&get("SELECT status FROM jobs WHERE job_key='slack-http-403'").status!=='dead';i++)await tick();
+  const invalid=get("SELECT status,attempts,error FROM jobs WHERE job_key='slack-permanent-error'");
+  const forbidden=get("SELECT status,attempts,error FROM jobs WHERE job_key='slack-http-403'");
+  assert.equal(invalid.status,'dead');assert.equal(invalid.attempts,1);assert.match(invalid.error,/invalid_auth/);
+  assert.equal(forbidden.status,'dead');assert.equal(forbidden.attempts,1);assert.match(forbidden.error,/forbidden/);assert.equal(attempts,2);
+ }finally{globalThis.fetch=original;run('DELETE FROM integrations WHERE org_id=? AND provider=?',org,'slack');}
+});
 test('frontend assets and their module imports are served without authentication',async()=>{
  const pending=['/','/app.js','/style.css'],visited=new Set();
  for(const path of pending){

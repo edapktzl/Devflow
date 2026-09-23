@@ -25,6 +25,7 @@ test('PR updates and resync do not repeat opened or merged notifications; genuin
  const jobs=all("SELECT * FROM jobs WHERE kind='slack'");
  assert.equal(jobs.length,4,'Opened, closed, reopened and merged only');
  const first=JSON.parse(jobs[0].payload);
+ assert.match(first.client_msg_id,/^devflow-[a-f0-9]{32}$/);
  assert.match(first.text,/DevFlow · Pull request açıldı #2/);
  assert.match(first.text,/Team management/);
  assert.match(first.text,/Repository: test\/repo/);
@@ -33,7 +34,7 @@ test('PR updates and resync do not repeat opened or merged notifications; genuin
  let sent;
  const original=globalThis.fetch;
  try{
-  globalThis.fetch=async(url,options)=>{assert.equal(url,'https://slack.com/api/chat.postMessage');sent=JSON.parse(options.body);return new Response(JSON.stringify({ok:true}));};
+  globalThis.fetch=async(url,options)=>{assert.equal(url,'https://slack.com/api/chat.postMessage');sent=JSON.parse(options.body);assert.equal(sent.client_msg_id,first.client_msg_id);return new Response(JSON.stringify({ok:true}));};
   await sendSlack({...first,task_id:42});
  }finally{globalThis.fetch=original;}
  assert.equal(sent.blocks[0].text.type,'plain_text');

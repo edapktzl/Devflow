@@ -1,5 +1,6 @@
-import {all,get,run,tx,id,now,crypt,fail,enqueue,emit,move,mentions,access} from './core.js';
+import {all,get,run,tx,id,now,hash,crypt,fail,enqueue,emit,move,mentions,access} from './core.js';
 import {slackNotification,githubUrl} from './slack-notifications.js';
+const slackPermanentErrors=new Set(['account_inactive','channel_not_found','is_archived','invalid_auth','invalid_blocks','invalid_blocks_format','missing_scope','no_permission','no_text','not_authed','not_in_channel','not_allowed_token_type','restricted_action','token_expired','token_revoked']);
 export async function external(provider,org,path,method='GET',body){
  const integration=get('SELECT * FROM integrations WHERE org_id=? AND provider=?',org,provider);if(!integration)fail(409,`${provider} is not connected`);
  const url=provider==='github'?`https://api.github.com${path}`:`https://slack.com/api/${path}`;
@@ -7,7 +8,9 @@ export async function external(provider,org,path,method='GET',body){
  const data=await response.json();if(!response.ok||(provider==='slack'&&!data.ok)){
  const reset=Number(response.headers.get('x-ratelimit-reset'))*1000;
  const retryAfter=Number(response.headers.get('retry-after'))*1000;
- throw Object.assign(new Error(`${provider} ${response.status}: ${data.error||data.message||'Request failed'}`),{retryAt:Math.max(now()+retryAfter,reset||0),status:502,providerStatus:response.status});
+ const providerError=String(data.error||data.message||'Request failed');
+ const permanent=provider==='slack'&&(response.status===401||response.status===403||slackPermanentErrors.has(data.error));
+ throw Object.assign(new Error(`${provider} ${response.status}: ${providerError}`),{retryAt:permanent?0:Math.max(now()+retryAfter,reset||0),retryable:!permanent,status:502,providerStatus:response.status});
  }return data;
 }
 export async function pages(org,path){let result=[];for(let page=1;page<=100;page++){const items=await external('github',org,`${path}${path.includes('?')?'&':'?'}per_page=100&page=${page}`);if(!Array.isArray(items))throw Error('Expected GitHub collection');result.push(...items);if(items.length<100)return result;}throw Error('Pagination limit exceeded; narrow reconciliation scope');}
@@ -92,7 +95,7 @@ export function processEvent(eid){
  const users=new Set([t?.assignee,...(payload.mentions?.users||[])]);if(e.type==='task.comment'&&t)for(const c of all('SELECT DISTINCT user_id FROM comments WHERE task_id=?',t.id))users.add(c.user_id);
  for(const uid of users)if(uid&&get('SELECT 1 FROM members WHERE org_id=? AND user_id=?',p.org_id,uid))run('INSERT OR IGNORE INTO notifications(id,event_id,user_id) VALUES(?,?,?)',id(),eid,uid);
  const notification=slackNotification(e,payload,p,t);
- const slack=(text,url,ruleId)=>{if(p.slack_channel&&get('SELECT 1 FROM integrations WHERE org_id=? AND provider=?',p.org_id,'slack'))enqueue(ruleId?`slack:${eid}:rule:${ruleId}`:`slack:${eid}`,'slack',{project_id:p.id,task_id:t?.id||null,text,url});};
+ const slack=(text,url,ruleId)=>{if(p.slack_channel&&get('SELECT 1 FROM integrations WHERE org_id=? AND provider=?',p.org_id,'slack')){const jobKey=ruleId?`slack:${eid}:rule:${ruleId}`:`slack:${eid}`;enqueue(jobKey,'slack',{project_id:p.id,task_id:t?.id||null,text,url,client_msg_id:`devflow-${hash(jobKey).slice(0,32)}`});}};
  const rules=all('SELECT * FROM rules WHERE project_id=? AND trigger=? AND enabled=1 ORDER BY id',p.id,e.type).filter(r=>!r.condition_status||t?.status===r.condition_status);
  if(notification&&!rules.some(r=>r.action==='slack'))slack(notification.text,notification.url);
  const current=e.source==='github'&&payload.kind?get('SELECT * FROM external_objects WHERE project_id=? AND kind=? AND external_id=?',p.id,payload.kind,String(payload.external_id)):null;
@@ -113,7 +116,8 @@ export async function sendSlack(data){const p=get('SELECT * FROM projects WHERE 
  const blocks=[{type:'section',text:{type:'plain_text',text:data.text.slice(0,2900)}}];
  if(githubUrl(data.url))blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'GitHub’da aç'},url:data.url}]});
  if(data.task_id)blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'Approve'},action_id:'approve',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Reject'},style:'danger',action_id:'reject',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Assign to Me'},action_id:'assign',value:String(data.task_id)},{type:'button',text:{type:'plain_text',text:'Open Task'},url:`${process.env.PUBLIC_URL||'http://localhost:3000'}/?task=${data.task_id}`} ]});
- await external('slack',p.org_id,'chat.postMessage','POST',{channel:p.slack_channel,text:data.text,blocks});
+ const message={channel:p.slack_channel,text:data.text,blocks};if(data.client_msg_id)message.client_msg_id=data.client_msg_id;
+ await external('slack',p.org_id,'chat.postMessage','POST',message);
 }
 export function slackAction(body){
  const action=body.actions?.[0];if(!['assign','approve','reject'].includes(action?.action_id))fail(400,'Unsupported action');

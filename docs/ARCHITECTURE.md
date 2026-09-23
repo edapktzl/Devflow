@@ -100,7 +100,7 @@ stateDiagram-v2
 - `BEGIN IMMEDIATE` ile bir due job seçilir; 60 saniyelik lease ve attempt artışı transaction içinde yazılır. 20 saniyede bir lease heartbeat yenilenir.
 - Github webhook işleme ve event fanout'ı, job `done` işaretiyle aynı transaction'dadır. Ortada crash olursa tüm domain etkileri rollback olur.
 - Slack/resync HTTP sırasında transaction tutulmaz. API fetch timeout 15 saniyedir.
-- Hata: exponential backoff `min(300000,1000*2^attempt)` + jitter. `Retry-After` veya GitHub rate reset daha geçse o zamana ertelenir. Altı başarısız deneme → dead-letter; hata metni ve attempt sayısı tutulur. 401/403 gibi kalıcı hatalar da PoC'de aynı deneme bütçesini tüketir.
+- Hata: geçici hatalarda exponential backoff `min(300000,1000*2^attempt)` + jitter uygulanır. `Retry-After` veya GitHub rate reset daha geçse o zamana ertelenir. Slack `401/403` ve `invalid_auth`, `token_revoked`, `channel_not_found` gibi kalıcı hatalar ilk denemede dead-letter'a alınır; `429`, timeout ve `5xx` tekrar denenir. Diğer hatalarda altı başarısız deneme → dead-letter; hata metni ve attempt sayısı tutulur.
 - En az bir kez yürütme semantiği. Tek worker önerilir; birden fazla worker için lease fencing, entity-partitioned queue ve provider bazlı rate limiter eklenmelidir.
 - Scheduler dakikada bir deadline tarar ve beş dakikalık zaman dilimi başına bir resync job'ı oluşturur. Kesinti sonrası bir sonraki tarama kalıcı durumu toparlar.
 
@@ -125,6 +125,8 @@ Dış kayıt değişmese bile görev ilişkileri yeniden değerlendirilir. Yeni 
 İlişki onarımı mevcut tablo ve API'leri kullanır, şema değişikliği gerektirmez. Tarama proje kapsamındadır ve silinmiş görevleri dışlar. PoC hacminde proje nesneleri taranır; büyük hacimlerde SHA/PR bağımlılık indeksiyle daraltılmalıdır.
 
 Yerel API idempotency senkron route'larda uygulanır. GitHub outbound aksiyonları ayrıca kalıcı `github_commands` tablosunu kullanır. OAuth callback ve repository doğrulaması bu mekanizmalara dahil değildir. Silinen görev için eski idempotent create yanıtı dönmesi standart retry semantiğidir; yeni oluşturma için yeni key kullanın.
+
+Slack outbound job'ları event/rule job key'inden türetilen deterministik `client_msg_id` taşır. Bu, provider'ın kabul edip ağ cevabının kaybolduğu retry senaryosunda provider tarafı duplicate korumasının kullanılabilmesini sağlar; queue yine en az bir kez yürütme semantiğindedir.
 
 ### GitHub outbound işlem kaydı
 
