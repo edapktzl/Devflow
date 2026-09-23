@@ -50,7 +50,8 @@ Runtime liste: `GET /api/endpoints`. Başarılı JSON route'ları 200 döner. Ha
 | GET | `/organizations/:org/github/repositories` | Canlı API'den erişilebilir repo'lar |
 | GET | `/projects/:pid/github/objects` | Yerel branch, commit, issue, PR, review, check, release |
 | POST | `/projects/:pid/github/resync` | Admin: kalıcı resync job oluştur |
-| POST | `/projects/:pid/github/actions` | GitHub'a açıkça talep edilmiş write action |
+| POST | `/projects/:pid/github/actions` | Idempotency-Key ile GitHub write action |
+| GET | `/projects/:pid/github/actions/:key` | Kullanıcının kendi işleminin durumu/sonucu |
 | GET | `/organizations/:org/jobs` | Admin: org kapsamındaki pending/running/dead işler |
 | POST | `/projects/:pid/jobs/:jid/retry` | Admin: bu projenin dead job'ını yeniden dene |
 
@@ -98,6 +99,31 @@ Content-Type: application/json
 Bir başka kullanıcı/automation versiyonu değiştirdiyse 409. GET ile yenileyin, değişikliği güncel state üzerinden uygulayın.
 
 ## GitHub outbound action body'leri
+
+Bu POST için `Idempotency-Key` zorunludur: 1–128 karakter; harf, rakam, nokta, alt çizgi, iki nokta ve tire kabul edilir. İstemci yeni bir işlem için bir UUID oluşturmalı ve yanıt kaybolduğunda **aynı anahtarı ve aynı isteği** tekrar kullanmalıdır. Anahtar kullanıcıya bağlıdır; proje, repository, aksiyon veya gönderilecek içerik değişirse 409 döner. JSON alan sırası farkı yeni işlem sayılmaz.
+
+```http
+POST /api/projects/PROJECT_UUID/github/actions
+Authorization: Bearer TOKEN
+Content-Type: application/json
+Idempotency-Key: issue-login-001
+
+{"action":"create_issue","title":"TASK-142 Login validation","body":"Details"}
+```
+
+Başarıda GitHub'ın JSON yanıtı 200 ile döner; aynı anahtarla tekrarında saklanan yanıt kullanılır. Olay, audit başarı kaydı ve resync işi çoğalmaz. Henüz süren isteğe 409 döner. Anahtar olmadan istek 400 ile reddedilir; GitHub'a gönderilmez. Mevcut web/extension akışı bu endpointi henüz kullanmaz.
+
+`GET /projects/:pid/github/actions/:key` işlemi başlatan kullanıcıya durumunu döndürür. Güncel proje yazma yetkisi, merge için ayrıca Owner/Admin rolü gerekir. Durumlar:
+
+| Durum | Anlam / istemci davranışı |
+|---|---|
+| `running` | İşlem sürüyor; bekleyip aynı anahtarla sorgula veya POST'u tekrarla. |
+| `completed` | `result` saklanan GitHub yanıtıdır. |
+| `rejected` | Kesin ret veya gönderim öncesi hata; `error` ve `error_status` saklanır. Aynı anahtar hatayı tekrar döndürür. Sebep giderildikten sonra yeni işlem yeni anahtarla başlatılabilir. |
+| `uncertain` | Timeout, 5xx, geçersiz yanıt veya başarı sonrası yerel kayıt hatası; GitHub'da işlem gerçekleşmiş olabilir. Otomatik tekrar gönderilmez. Önce GitHub'dan sonucu doğrulayın. |
+
+Çökme sonrası 60 saniyeden eski `running` kayıtları sorgulamada `uncertain` olarak gösterilir; yazma hakkı başka isteğe verilmez. Otomatik sonuç uzlaştırması bu pakette yoktur. Belirsiz işlem için hemen yeni anahtar üretmek çift kayıt riskini geri getirir. Koruma aynı kullanıcının aynı anahtarıyla sınırlıdır; farklı anahtarlar/kullanıcılar ayrı işlemlerdir. Kayıtlar sunucu yeniden başlayınca korunur; otomatik silinmez.
+
 
 ```json
 {"action":"create_issue","title":"TASK-142 Login validation","body":"Details"}

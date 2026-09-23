@@ -4,6 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {all,get,run,tx,id,now,fail,required,hash,password,verifyPassword,equal,crypt,signature,access,project,task,enqueue,audit,emit,move,mentions} from './core.js';
 import {external,pages,slackAction} from './integrations.js';
+import {githubAction,githubActionStatus} from './github-actions.js';
 const base=()=>((process.env.PUBLIC_URL||'http://localhost:3000').replace(/\/+$/,''));
 const routes=[];
 function route(method,path,handler,options={}){const names=[];const pattern=new RegExp('^'+path.replace(/:([\w]+)/g,(_,n)=>{names.push(n);return '([^/]+)';})+'$');routes.push({method,path,pattern,names,handler,...options});}
@@ -86,18 +87,8 @@ route('DELETE','/api/organizations/:org/integrations/:provider',({user,p})=>{acc
 route('GET','/api/organizations/:org/github/repositories',async({user,p})=>{access(user,p.org);return pages(p.org,'/user/repos?sort=updated');},{async:true});
 route('GET','/api/projects/:pid/github/objects',({user,p})=>{project(user,p.pid);return all('SELECT * FROM external_objects WHERE project_id=?',p.pid);});
 route('POST','/api/projects/:pid/github/resync',({user,p})=>{project(user,p.pid,true,true);enqueue(`resync:${id()}`,'resync',{project_id:p.pid});return {queued:true};});
-route('POST','/api/projects/:pid/github/actions',async({user,p,b})=>{
- const pr=project(user,p.pid,true),root=`/repos/${pr.repo}`;if(!pr.repo)fail(409,'Map a repository first');let path,method='POST',body;
- const number=Number(b.number);if(['close_issue','comment','labels','merge'].includes(b.action)&&(!Number.isSafeInteger(number)||number<1))fail(400,'Invalid issue/PR number');
- if(b.action==='create_issue'){path='/issues';body={title:required(b.title),body:b.body||''};}
- else if(b.action==='close_issue'){path=`/issues/${number}`;method='PATCH';body={state:'closed'};}
- else if(b.action==='comment'){path=`/issues/${number}/comments`;body={body:required(b.body)};}
- else if(b.action==='labels'){if(!Array.isArray(b.labels)||b.labels.some(x=>typeof x!=='string'))fail(400,'Invalid labels');path=`/issues/${number}/labels`;body={labels:b.labels};}
- else if(b.action==='branch'){if(!/^[\w./-]+$/.test(b.name||'')||b.name.includes('..')||! /^[a-f0-9]{40}$/i.test(b.sha||''))fail(400,'Invalid branch or SHA');path='/git/refs';body={ref:`refs/heads/${b.name}`,sha:b.sha};}
- else if(b.action==='merge'){access(user,pr.org_id,true,true);const pull=await external('github',pr.org_id,`${root}/pulls/${number}`);if(pull.draft||pull.state!=='open'||pull.mergeable!==true||pull.mergeable_state!=='clean'||b.sha!==pull.head.sha)fail(409,'PR must be clean, mergeable and match supplied head SHA');path=`/pulls/${number}/merge`;method='PUT';body={sha:b.sha,merge_method:'squash'};}
- else fail(400,'Unknown action');
- const result=await external('github',pr.org_id,root+path,method,body);tx(()=>{emit(pr.id,'github.action',{action:b.action,number:result.number||number||null},null,user);enqueue(`resync:${id()}`,'resync',{project_id:pr.id});});return result;
-},{async:true});
+route('POST','/api/projects/:pid/github/actions',({user,p,b,req})=>githubAction(user,p.pid,b,req.headers['idempotency-key']),{async:true});
+route('GET','/api/projects/:pid/github/actions/:key',({user,p})=>githubActionStatus(user,p.pid,p.key));
 route('POST','/api/organizations/:org/oauth/:provider',({user,p})=>{
  if(!['github','slack'].includes(p.provider))fail(404,'Unknown provider');access(user,p.org,true,true);const prefix=p.provider.toUpperCase(),client=process.env[`${prefix}_CLIENT_ID`],secret=process.env[`${prefix}_CLIENT_SECRET`];if(!client||!secret)fail(503,'OAuth client is not configured');const state=randomBytes(32).toString('hex');run('INSERT INTO oauth_states VALUES(?,?,?,?,?)',hash(state),user,p.org,p.provider,now()+600000);
  const params=new URLSearchParams({client_id:client,state,redirect_uri:`${base()}/oauth/${p.provider}/callback`,scope:p.provider==='github'?'repo read:user':'chat:write'});

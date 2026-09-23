@@ -124,7 +124,15 @@ Dış kayıt değişmese bile görev ilişkileri yeniden değerlendirilir. Yeni 
 
 İlişki onarımı mevcut tablo ve API'leri kullanır, şema değişikliği gerektirmez. Tarama proje kapsamındadır ve silinmiş görevleri dışlar. PoC hacminde proje nesneleri taranır; büyük hacimlerde SHA/PR bağımlılık indeksiyle daraltılmalıdır.
 
-API idempotency senkron yerel route'larda uygulanır. OAuth callback, repository doğrulaması ve GitHub outbound aksiyonları async route olduğundan bu garantiye dahil değildir. Silinen görev için eski idempotent create yanıtı dönmesi standart retry semantiğidir; yeni oluşturma için yeni key kullanın.
+Yerel API idempotency senkron route'larda uygulanır. GitHub outbound aksiyonları ayrıca kalıcı `github_commands` tablosunu kullanır. OAuth callback ve repository doğrulaması bu mekanizmalara dahil değildir. Silinen görev için eski idempotent create yanıtı dönmesi standart retry semantiğidir; yeni oluşturma için yeni key kullanın.
+
+### GitHub outbound işlem kaydı
+
+`Idempotency-Key` zorunludur. `(user_id,key)` unique anahtarı ve normalize edilmiş proje/repository/istek hash'iyle işlem, GitHub çağrısından önce transaction içinde `running` olarak kaydedilir. HTTP beklenirken transaction tutulmaz. Başarı yanıtı, domain olayı ve resync işi tek transaction'da kaydedilir. Tekrarlar güncel yetkiler kontrol edilerek aynı yanıtı döndürür; hash uyuşmazlığı 409'dur. Merge ön kontrolü sonrasında yetki ve repository tekrar doğrulanır.
+
+`running → completed | rejected | uncertain`. Gönderim öncesi hata veya kesin provider reddi `rejected`; gönderim sonrası timeout/5xx, geçersiz yanıt veya yerel kayıt başarısızlığı `uncertain` olur. Başlatma ve hata durumları audit'e yazılır. 60 saniyeden eski sahipsiz `running` kayıtları API'de `uncertain` olarak gösterilir; bu süre yeni gönderim izni vermez. Worker bu işlemleri otomatik tekrar göndermez.
+
+Bu, aynı anahtarla tekrar gönderimi önler; provider ile yerel DB arasında atomik commit veya tam exactly-once garantisi değildir. Belirsiz sonucun GitHub'dan doğrulanması gerekir. Yeni anahtar/kullanıcı yeni işlem sayılır. Anahtar kayıtlarının otomatik temizlenmesi yoktur; gelecekte retention politikası istemci tekrar süresini gözetmelidir.
 
 ## Permission modeli
 
@@ -146,6 +154,6 @@ Parolalar rastgele salt ile scrypt kullanır. Bearer session tokeni 7 gün geçe
 1. SQLite → PostgreSQL, gerçek migration runner, composite tenant foreign key ve Row Level Security.
 2. Aynı transactional outbox sözleşmesini koruyarak worker'ı PostgreSQL `SKIP LOCKED` veya message broker'a taşıma; entity partitioning ve fencing.
 3. GitHub App installation tokenleri, dar izinler, provider başına rate-limit bütçesi, incremental resync cursor, tombstone reconciliation.
-4. Outbound GitHub komutları için kalıcı command log, provider durumuyla sonuç doğrulama. Slack belirsiz teslimleri için reconciliation ve açık delivery status.
+4. Kalıcı GitHub command log üzerindeki belirsiz sonuçları provider durumuyla otomatik doğrulama. Slack belirsiz teslimleri için reconciliation ve açık delivery status.
 5. OIDC, proje ACL, ayrı kişisel entegrasyonlar, token rotation, audit export, retention, metrics/tracing, DLQ alarmı.
 6. SSE event cursor'ını koruyarak fanout/pubsub; dosya tabanlı polling yerine broker broadcast.

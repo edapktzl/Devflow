@@ -27,3 +27,22 @@ CREATE TABLE IF NOT EXISTS idempotency(user_id TEXT,key TEXT,request_hash TEXT,r
 CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status,available_at);
 CREATE INDEX IF NOT EXISTS events_project ON events(project_id,id);
 CREATE INDEX IF NOT EXISTS tasks_project ON tasks(project_id,deleted_at);
+
+-- Durable outbound requests. Never delete/reuse keys while a client may retry.
+CREATE TABLE IF NOT EXISTS github_commands(
+ id TEXT PRIMARY KEY,
+ user_id TEXT NOT NULL REFERENCES users(id),
+ key TEXT NOT NULL,
+ project_id TEXT NOT NULL REFERENCES projects(id),
+ repo TEXT NOT NULL,
+ action TEXT NOT NULL,
+ request_hash TEXT NOT NULL,
+ request TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('running','completed','rejected','uncertain')),
+ response TEXT,
+ error_status INTEGER,
+ error TEXT,
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ UNIQUE(user_id,key)
+);

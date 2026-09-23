@@ -7,7 +7,7 @@ export async function external(provider,org,path,method='GET',body){
  const data=await response.json();if(!response.ok||(provider==='slack'&&!data.ok)){
  const reset=Number(response.headers.get('x-ratelimit-reset'))*1000;
  const retryAfter=Number(response.headers.get('retry-after'))*1000;
- throw Object.assign(new Error(`${provider} ${response.status}: ${data.error||data.message||'Request failed'}`),{retryAt:Math.max(now()+retryAfter,reset||0),status:502});
+ throw Object.assign(new Error(`${provider} ${response.status}: ${data.error||data.message||'Request failed'}`),{retryAt:Math.max(now()+retryAfter,reset||0),status:502,providerStatus:response.status});
  }return data;
 }
 export async function pages(org,path){let result=[];for(let page=1;page<=100;page++){const items=await external('github',org,`${path}${path.includes('?')?'&':'?'}per_page=100&page=${page}`);if(!Array.isArray(items))throw Error('Expected GitHub collection');result.push(...items);if(items.length<100)return result;}throw Error('Pagination limit exceeded; narrow reconciliation scope');}
