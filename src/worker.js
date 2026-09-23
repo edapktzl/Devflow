@@ -1,5 +1,5 @@
 import {pathToFileURL} from 'node:url';
-import {get,all,run,tx,now,enqueue,emit} from './core.js';
+import {get,all,run,tx,now,enqueueResync,emit} from './core.js';
 import {githubDelivery,processEvent,sendSlack,resync} from './integrations.js';
 export async function tick(){
  const job=tx(()=>{const j=get("SELECT * FROM jobs WHERE (status='pending' AND available_at<=?) OR (status='running' AND lease_until<?) ORDER BY id LIMIT 1",now(),now());if(j)run("UPDATE jobs SET status='running',lease_until=?,attempts=attempts+1 WHERE id=?",now()+60000,j.id);return j;});if(!job)return false;
@@ -8,5 +8,5 @@ export async function tick(){
  catch(e){run('UPDATE jobs SET status=?,available_at=?,lease_until=NULL,error=? WHERE id=?',job.attempts+1>=6?'dead':'pending',Math.max(now()+Math.min(300000,1000*2**job.attempts)+Math.random()*1000,e.retryAt||0),String(e.message).slice(0,500),job.id);}
  finally{clearInterval(heartbeat);}return true;
 }
-export function schedule(){tx(()=>{for(const p of all('SELECT id FROM projects WHERE repo IS NOT NULL AND deleted_at IS NULL'))enqueue(`resync:${p.id}:${Math.floor(now()/300000)}`,'resync',{project_id:p.id});for(const t of all('SELECT t.* FROM tasks t JOIN columns c ON c.id=t.column_id JOIN projects p ON p.id=t.project_id WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.due_date IS NOT NULL AND c.name<>?', 'Done'))if(Date.parse(t.due_date)<now())emit(t.project_id,'task.deadline',{},t.id,null,'scheduler',`deadline:${t.id}:${t.due_date}`);});}
+export function schedule(){const current=now();tx(()=>{run('DELETE FROM sessions WHERE expires<=?',current);run('DELETE FROM oauth_states WHERE expires<=?',current);run('DELETE FROM idempotency WHERE created_at>0 AND created_at<?',current-30*86400000);const bucket=Math.floor(current/300000);for(const p of all('SELECT id FROM projects WHERE repo IS NOT NULL AND deleted_at IS NULL'))enqueueResync(p.id,`resync:${p.id}:${bucket}`,current);for(const t of all('SELECT t.* FROM tasks t JOIN columns c ON c.id=t.column_id JOIN projects p ON p.id=t.project_id WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.due_date IS NOT NULL AND c.name<>?', 'Done'))if(Date.parse(t.due_date)<current)emit(t.project_id,'task.deadline',{},t.id,null,'scheduler',`deadline:${t.id}:${t.due_date}`);});}
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){console.log('DevFlow worker started');let stop=false;process.on('SIGTERM',()=>{stop=true;});process.on('SIGINT',()=>{stop=true;});let next=0;while(!stop){if(now()>next){schedule();next=now()+60000;}if(!await tick())await new Promise(r=>setTimeout(r,500));}}

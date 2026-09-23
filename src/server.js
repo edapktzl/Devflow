@@ -2,7 +2,7 @@ import http from 'node:http';
 import {readFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {randomBytes} from 'node:crypto';
-import {all,get,run,tx,id,now,fail,required,hash,password,verifyPassword,equal,crypt,signature,access,project,task,enqueue,audit,emit,move,mentions} from './core.js';
+import {all,get,run,tx,id,now,fail,required,hash,password,verifyPassword,equal,crypt,signature,access,project,task,enqueue,enqueueResync,audit,emit,move,mentions} from './core.js';
 import {external,pages,slackAction} from './integrations.js';
 import {githubAction,githubActionStatus} from './github-actions.js';
 const base=()=>((process.env.PUBLIC_URL||'http://localhost:3000').replace(/\/+$/,''));
@@ -60,7 +60,7 @@ route('DELETE','/api/organizations/:org/teams/:team',({user,p})=>{
 });
 route('GET','/api/organizations/:org/projects',({user,p})=>{access(user,p.org);return all('SELECT * FROM projects WHERE org_id=? AND deleted_at IS NULL',p.org);});
 route('POST','/api/organizations/:org/projects',({user,p,b})=>{access(user,p.org,true);const pid=id(),bid=id();run('INSERT INTO projects(id,org_id,name) VALUES(?,?,?)',pid,p.org,required(b.name));run('INSERT INTO boards VALUES(?,?,?)',bid,pid,'Main board');['Backlog','Todo','In Progress','Review','Done'].forEach((name,i)=>run('INSERT INTO columns VALUES(?,?,?,?)',id(),bid,name,i));for(const [trigger,condition,action,value] of [['pr.opened',null,'set_status','Review'],['pr.merged','Review','set_status','Done'],['pr.merged','In Progress','set_status','Done'],['ci.failed',null,'comment','GitHub CI failed. Inspect the linked check.']])run('INSERT INTO rules(id,project_id,trigger,condition_status,action,value) VALUES(?,?,?,?,?,?)',id(),pid,trigger,condition,action,value);emit(pid,'project.created',{},null,user);return {id:pid,board_id:bid};});
-route('PATCH','/api/projects/:pid',async({user,p,b})=>{const pr=project(user,p.pid,true,true);if(b.repo!==undefined&&b.repo!==null){if(!/^[\w.-]+\/[\w.-]+$/.test(b.repo))fail(400,'Expected owner/repository');const repo=await external('github',pr.org_id,`/repos/${b.repo}`);b.repo=required(repo.full_name,'GitHub repository name');}if(b.slack_channel!==undefined&&b.slack_channel!==null&&!/^[CG][A-Z0-9]+$/.test(b.slack_channel))fail(400,'Invalid channel ID');tx(()=>{const current=project(user,p.pid,true,true);run('UPDATE projects SET repo=?,slack_channel=? WHERE id=?',b.repo===undefined?current.repo:b.repo,b.slack_channel===undefined?current.slack_channel:b.slack_channel,pr.id);audit(pr.org_id,user,'project.integrations_updated',{repo:b.repo,slack_channel:b.slack_channel});if(b.repo)enqueue(`resync:${id()}`,'resync',{project_id:pr.id});});return {ok:true};},{async:true});
+route('PATCH','/api/projects/:pid',async({user,p,b})=>{const pr=project(user,p.pid,true,true);if(b.repo!==undefined&&b.repo!==null){if(!/^[\w.-]+\/[\w.-]+$/.test(b.repo))fail(400,'Expected owner/repository');const repo=await external('github',pr.org_id,`/repos/${b.repo}`);b.repo=required(repo.full_name,'GitHub repository name');}if(b.slack_channel!==undefined&&b.slack_channel!==null&&!/^[CG][A-Z0-9]+$/.test(b.slack_channel))fail(400,'Invalid channel ID');tx(()=>{const current=project(user,p.pid,true,true);run('UPDATE projects SET repo=?,slack_channel=? WHERE id=?',b.repo===undefined?current.repo:b.repo,b.slack_channel===undefined?current.slack_channel:b.slack_channel,pr.id);audit(pr.org_id,user,'project.integrations_updated',{repo:b.repo,slack_channel:b.slack_channel});if(b.repo)enqueueResync(pr.id);});return {ok:true};},{async:true});
 route('DELETE','/api/projects/:pid',({user,p})=>{const pr=project(user,p.pid,true,true);run('UPDATE projects SET deleted_at=? WHERE id=?',now(),pr.id);audit(pr.org_id,user,'project.deleted',{id:pr.id});return {ok:true};});
 route('GET','/api/projects/:pid/board',({user,p})=>{project(user,p.pid);return {boards:all('SELECT * FROM boards WHERE project_id=?',p.pid),columns:boardColumns(p.pid),tasks:all('SELECT t.*,c.name AS status FROM tasks t JOIN columns c ON c.id=t.column_id WHERE t.project_id=? AND t.deleted_at IS NULL ORDER BY t.id',p.pid)};});
 route('POST','/api/projects/:pid/columns',({user,p,b})=>{project(user,p.pid,true);const board=get('SELECT * FROM boards WHERE id=? AND project_id=?',b.board_id||'',p.pid);if(!board)fail(400,'Invalid board');const cid=id();run('INSERT INTO columns VALUES(?,?,?,?)',cid,board.id,required(b.name),boardColumns(p.pid).length);emit(p.pid,'column.created',{id:cid,name:b.name},null,user);return {id:cid};});
@@ -86,7 +86,7 @@ route('GET','/api/organizations/:org/slack/identities',({user,p})=>{access(user,
 route('DELETE','/api/organizations/:org/integrations/:provider',({user,p})=>{access(user,p.org,true,true);run('DELETE FROM integrations WHERE org_id=? AND provider=?',p.org,p.provider);audit(p.org,user,'integration.disconnected',{provider:p.provider});return {ok:true};});
 route('GET','/api/organizations/:org/github/repositories',async({user,p})=>{access(user,p.org);return pages(p.org,'/user/repos?sort=updated');},{async:true});
 route('GET','/api/projects/:pid/github/objects',({user,p})=>{project(user,p.pid);return all('SELECT * FROM external_objects WHERE project_id=?',p.pid);});
-route('POST','/api/projects/:pid/github/resync',({user,p})=>{project(user,p.pid,true,true);enqueue(`resync:${id()}`,'resync',{project_id:p.pid});return {queued:true};});
+route('POST','/api/projects/:pid/github/resync',({user,p})=>{project(user,p.pid,true,true);return {queued:enqueueResync(p.pid)};});
 route('POST','/api/projects/:pid/github/actions',({user,p,b,req})=>githubAction(user,p.pid,b,req.headers['idempotency-key']),{async:true});
 route('GET','/api/projects/:pid/github/actions/:key',({user,p})=>githubActionStatus(user,p.pid,p.key));
 route('POST','/api/organizations/:org/oauth/:provider',({user,p})=>{
@@ -99,22 +99,41 @@ route('GET','/oauth/:provider/callback',async({p,q})=>{
  const prefix=p.provider.toUpperCase(),client=process.env[`${prefix}_CLIENT_ID`],secret=process.env[`${prefix}_CLIENT_SECRET`];if(!client||!secret)fail(503,'OAuth client is not configured');const redirectUri=`${base()}/oauth/${p.provider}/callback`,form=new URLSearchParams({client_id:client,client_secret:secret,code:required(q.get('code')),redirect_uri:redirectUri});
  let response,data;try{response=await fetch(p.provider==='github'?'https://github.com/login/oauth/access_token':'https://slack.com/api/oauth.v2.access',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/x-www-form-urlencoded'},body:form,signal:AbortSignal.timeout(15000)});data=await response.json();}catch(error){console.error(`OAuth ${p.provider} token exchange network failure`,error.cause?.code||error.code||error.name||'network_error');fail(502,`${p.provider} OAuth token exchange unavailable`);}if(!response.ok||data.ok===false||!data.access_token){const providerError=String(data?.error||data?.message||`HTTP ${response.status}`).slice(0,120);console.error(`OAuth ${p.provider} token exchange rejected`,providerError);fail(502,`${p.provider} OAuth authorization failed: ${providerError}`);}
  let externalId=data.team?.id||null,identity=data.authed_user?.id;
- if(p.provider==='github'){const r=await fetch('https://api.github.com/user',{headers:{Authorization:`Bearer ${data.access_token}`,Accept:'application/json'},signal:AbortSignal.timeout(15000)});if(!r.ok)fail(502,'Cannot read GitHub identity');externalId=String((await r.json()).id);identity=externalId;}
+ if(p.provider==='github'){
+  try{
+   const r=await fetch('https://api.github.com/user',{headers:{Authorization:`Bearer ${data.access_token}`,Accept:'application/json'},signal:AbortSignal.timeout(15000)});
+   if(!r.ok)fail(502,'Cannot read GitHub identity');
+   const identityData=await r.json();
+   if(!identityData||identityData.id===undefined||identityData.id===null)fail(502,'Cannot read GitHub identity');
+   externalId=String(identityData.id);identity=externalId;
+  }catch(error){
+   if(error?.status===502)throw error;
+   console.error('OAuth github identity lookup failure',error.cause?.code||error.code||error.name||'network_error');
+   fail(502,'github OAuth identity lookup unavailable');
+  }
+ }
  tx(()=>{access(state.user_id,state.org_id,true,true);run('INSERT INTO integrations VALUES(?,?,?,?) ON CONFLICT(org_id,provider) DO UPDATE SET token=excluded.token,external_id=excluded.external_id',state.org_id,p.provider,crypt(data.access_token),externalId);if(identity)run('INSERT INTO identities VALUES(?,?,?,?) ON CONFLICT(provider,external_id,org_id) DO UPDATE SET user_id=excluded.user_id',p.provider,identity,state.org_id,state.user_id);audit(state.org_id,state.user_id,'integration.connected',{provider:p.provider});});return {redirect:`${base()}/?integration=${encodeURIComponent(p.provider)}&status=connected`};
 },{public:true,async:true});
 route('POST','/api/organizations/:org/slack/identities',({user,p,b})=>{access(user,p.org,true,true);checkedAssignee(p.org,b.user_id);if(!/^[UW][A-Z0-9]+$/.test(b.slack_user_id||''))fail(400,'Invalid Slack user ID');run('INSERT INTO identities VALUES(?,?,?,?) ON CONFLICT(provider,external_id,org_id) DO UPDATE SET user_id=excluded.user_id','slack',b.slack_user_id,p.org,b.user_id);audit(p.org,user,'slack.identity_linked',{slack_user_id:b.slack_user_id,user_id:b.user_id});return {ok:true};});
 route('POST','/webhooks/github',({req,raw,b})=>{if(!equal(signature(process.env.GITHUB_WEBHOOK_SECRET,raw),req.headers['x-hub-signature-256']))fail(401,'Invalid signature');const delivery=required(req.headers['x-github-delivery'],'delivery ID');enqueue(`github:${delivery}`,'github',{event:req.headers['x-github-event']||'',body:b});return {accepted:true};},{public:true});
-route('POST','/webhooks/slack',({req,raw,b})=>{const stamp=req.headers['x-slack-request-timestamp'];if(!stamp||Math.abs(now()/1000-Number(stamp))>300||!Number.isFinite(Number(stamp)))fail(401,'Expired Slack request');if(!equal(signature(process.env.SLACK_SIGNING_SECRET,`v0:${stamp}:${raw}`,'v0='),req.headers['x-slack-signature']))fail(401,'Invalid signature');if(b.type==='url_verification')return {challenge:b.challenge};if(b.payload){const key=hash(raw);if(get('SELECT 1 FROM idempotency WHERE user_id=? AND key=?','slack',key))return {ok:true};slackAction(JSON.parse(b.payload));run('INSERT INTO idempotency VALUES(?,?,?,?)','slack',key,key,'{}');}return {ok:true};},{public:true});
+route('POST','/webhooks/slack',({req,raw,b})=>{const stamp=req.headers['x-slack-request-timestamp'];if(!stamp||Math.abs(now()/1000-Number(stamp))>300||!Number.isFinite(Number(stamp)))fail(401,'Expired Slack request');if(!equal(signature(process.env.SLACK_SIGNING_SECRET,`v0:${stamp}:${raw}`,'v0='),req.headers['x-slack-signature']))fail(401,'Invalid signature');if(b.type==='url_verification')return {challenge:b.challenge};if(b.payload){const key=hash(raw);if(get('SELECT 1 FROM idempotency WHERE user_id=? AND key=?','slack',key))return {ok:true};slackAction(JSON.parse(b.payload));run('INSERT INTO idempotency(user_id,key,request_hash,response,created_at) VALUES(?,?,?,?,?)','slack',key,key,'{}',now());}return {ok:true};},{public:true});
 route('GET','/api/organizations/:org/jobs',({user,p})=>{access(user,p.org,false,true);const pids=all('SELECT id FROM projects WHERE org_id=?',p.org).map(x=>x.id);return all("SELECT * FROM jobs WHERE status IN ('dead','pending','running') ORDER BY id DESC").filter(j=>{const d=JSON.parse(j.payload);return pids.includes(d.project_id)||j.kind==='event'&&pids.includes(get('SELECT project_id FROM events WHERE id=?',d.id)?.project_id)||j.kind==='github'&&all('SELECT repo FROM projects WHERE org_id=?',p.org).some(p=>p.repo&&p.repo===d.body.repository?.full_name);}).map(({payload,...j})=>j);});
 route('POST','/api/projects/:pid/jobs/:jid/retry',({user,p})=>{project(user,p.pid,true,true);const j=get("SELECT * FROM jobs WHERE id=? AND status='dead'",Number(p.jid));if(!j)fail(404,'Dead job not found');const d=JSON.parse(j.payload);const pid=d.project_id||(j.kind==='event'?get('SELECT project_id FROM events WHERE id=?',d.id)?.project_id:j.kind==='github'?get('SELECT id FROM projects WHERE repo=?',d.body.repository?.full_name||'')?.id:null);if(pid!==p.pid)fail(403,'Wrong project');run("UPDATE jobs SET status='pending',attempts=0,available_at=? WHERE id=?",now(),j.id);emit(p.pid,'job.retried',{job_id:j.id},null,user);return {ok:true};});
 const limits=new Map();
+export function clientAddress(req){
+ if(process.env.TRUST_PROXY==='cloudflare'){
+  const forwarded=req.headers['cf-connecting-ip'];
+  if(typeof forwarded==='string'&&forwarded.length>0&&forwarded.length<=64)return forwarded.trim();
+ }
+ return req.socket.remoteAddress||'';
+}
 route('GET','/api/projects/:pid/stream',({user,p,q,req,res,token})=>{
  project(user,p.pid);let cursor=Number(q.get('after'))||0;
  res.writeHead(200,{'Content-Type':'text/event-stream','Connection':'keep-alive','X-Accel-Buffering':'no'});
  const send=()=>{try{if(!get('SELECT 1 FROM sessions WHERE token=? AND expires>?',hash(token),now()))throw Error('Expired session');project(user,p.pid);const events=all('SELECT * FROM events WHERE project_id=? AND id>? ORDER BY id LIMIT 100',p.pid,cursor);for(const e of events){res.write(`id: ${e.id}\ndata: ${JSON.stringify(e)}\n\n`);cursor=e.id;}res.write(': heartbeat\n\n');}catch{clearInterval(timer);res.end();}};
  const timer=setInterval(send,1500);send();res.on('close',()=>clearInterval(timer));
 },{stream:true});
-function rateLimit(req,path){const key=(req.socket.remoteAddress||'')+':'+(path.startsWith('/api/auth')?'auth':'api');const limit=path.startsWith('/api/auth')?30:1000;const slot=Math.floor(now()/60000),entry=limits.get(key);if(!entry||entry.slot!==slot)limits.set(key,{slot,count:1});else if(++entry.count>limit)fail(429,'Rate limit exceeded');if(limits.size>10000)for(const [k,v]of limits)if(v.slot!==slot)limits.delete(k);}
+function rateLimit(req,path){const key=clientAddress(req)+':'+(path.startsWith('/api/auth')?'auth':'api');const limit=path.startsWith('/api/auth')?30:1000;const slot=Math.floor(now()/60000),entry=limits.get(key);if(!entry||entry.slot!==slot)limits.set(key,{slot,count:1});else if(++entry.count>limit)fail(429,'Rate limit exceeded');if(limits.size>10000)for(const [k,v]of limits)if(v.slot!==slot)limits.delete(k);}
 export const server=http.createServer(async(req,res)=>{
  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
  try{
@@ -129,8 +148,8 @@ export const server=http.createServer(async(req,res)=>{
  let result;
  if(r.async)result=await r.handler(context);else result=tx(()=>{
  const key=req.headers['idempotency-key'];const fingerprint=hash(req.method+url.pathname+raw);if(key&&session&&req.method!=='GET'){const old=get('SELECT * FROM idempotency WHERE user_id=? AND key=?',session.user_id,key);if(old){if(old.request_hash!==fingerprint)fail(409,'Idempotency key reused with another request');return JSON.parse(old.response);}}
- const out=r.handler(context);if(key&&session&&req.method!=='GET')run('INSERT INTO idempotency VALUES(?,?,?,?)',session.user_id,key,fingerprint,JSON.stringify(out));return out;
- });if(result?.redirect){res.writeHead(result.status||303,{'Location':result.redirect,'Cache-Control':'no-store'});res.end();return;}res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(result));
+ const out=r.handler(context);if(key&&session&&req.method!=='GET')run('INSERT INTO idempotency(user_id,key,request_hash,response,created_at) VALUES(?,?,?,?,?)',session.user_id,key,fingerprint,JSON.stringify(out),now());return out;
+ },req.method!=='GET');if(result?.redirect){res.writeHead(result.status||303,{'Location':result.redirect,'Cache-Control':'no-store'});res.end();return;}res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(result));
  }catch(e){res.statusCode=e.status||(e.code?.startsWith('ERR_SQLITE')?400:500);res.setHeader('Content-Type','application/json; charset=utf-8');if(res.statusCode===500)console.error(e);res.end(JSON.stringify({error:res.statusCode===500?'Internal server error':e.status?e.message:'Invalid or conflicting data'}));}
 });
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)server.listen(Number(process.env.PORT)||3000,'0.0.0.0',()=>console.log(`DevFlow listening on ${base()}`));

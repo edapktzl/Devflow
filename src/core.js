@@ -2,15 +2,17 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {randomUUID,randomBytes,scryptSync,timingSafeEqual,createHash,createCipheriv,createDecipheriv,createHmac} from 'node:crypto';
+import {migrate} from './migrations.js';
 export const id=()=>randomUUID(), now=()=>Date.now();
 const path=process.env.DATABASE_PATH||'data/devflow.db';
 if(path!==':memory:')mkdirSync(dirname(path),{recursive:true});
 export const db=new DatabaseSync(path);
 db.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));
+migrate(db);
 export const get=(sql,...args)=>db.prepare(sql).get(...args);
 export const all=(sql,...args)=>db.prepare(sql).all(...args);
 export const run=(sql,...args)=>db.prepare(sql).run(...args);
-export function tx(fn){db.exec('BEGIN IMMEDIATE');try{const result=fn();db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}
+export function tx(fn,immediate=true){db.exec(immediate?'BEGIN IMMEDIATE':'BEGIN');try{const result=fn();db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}
 export function fail(status,message){throw Object.assign(new Error(message),{status});}
 export function required(value,name='value'){if(typeof value!=='string'||!value.trim()||value.length>10000)fail(400,`Invalid ${name}`);return value.trim();}
 export const hash=v=>createHash('sha256').update(v).digest('hex');
@@ -23,6 +25,11 @@ export function access(user,org,write=false,admin=false){const m=get('SELECT * F
 export function project(user,pid,write=false,admin=false){const p=get('SELECT * FROM projects WHERE id=? AND deleted_at IS NULL',pid);if(!p)fail(404,'Project not found');access(user,p.org_id,write,admin);return p;}
 export function task(user,tid,write=false){const t=get('SELECT t.*,c.name AS status FROM tasks t JOIN columns c ON c.id=t.column_id WHERE t.id=? AND t.deleted_at IS NULL',Number(tid));if(!t)fail(404,'Task not found');project(user,t.project_id,write);return t;}
 export function enqueue(key,kind,payload,at=now()){run('INSERT OR IGNORE INTO jobs(job_key,kind,payload,available_at) VALUES(?,?,?,?)',key,kind,JSON.stringify(payload),at);}
+export function enqueueResync(projectId,key=`resync:${projectId}:${id()}`,at=now()){
+ const active=get("SELECT id FROM jobs WHERE kind='resync' AND status IN ('pending','running') AND json_extract(payload,'$.project_id')=?",projectId);
+ if(active)return false;
+ enqueue(key,'resync',{project_id:projectId},at);return true;
+}
 export function audit(org,actor,action,payload){run('INSERT INTO audit(org_id,actor,action,payload,created_at) VALUES(?,?,?,?,?)',org,actor,action,JSON.stringify(payload),now());}
 export function emit(pid,type,payload={},tid=null,actor=null,source='platform',key=id()){
  const result=run('INSERT OR IGNORE INTO events(event_key,project_id,task_id,source,type,actor,payload,created_at) VALUES(?,?,?,?,?,?,?,?)',key,pid,tid,source,type,actor,JSON.stringify(payload),now());

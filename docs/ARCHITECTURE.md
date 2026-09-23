@@ -43,7 +43,7 @@ erDiagram
   ORGANIZATIONS ||--o{ INTEGRATIONS : authorizes
 ```
 
-DDL: `src/schema.sql`. İlk açılışta `CREATE TABLE IF NOT EXISTS` ile uygulanır; sürümlü migration runner yoktur. Mevcut bir şemayı değiştirmek için ileride migration eklenmelidir. Task ID global monotonic integer'dır (`TASK-142`), dış referanslar projeye göre filtrelenir. Global ID tahmin edilebilse de tenant erişimi ayrıca zorunludur.
+DDL: `src/schema.sql`; açılışta `src/migrations.js` içindeki sürümlü migration runner çalışır. Mevcut veritabanlarında migration transaction içinde uygulanır ve `schema_migrations` tablosunda izlenir. Task ID global monotonic integer'dır (`TASK-142`), dış referanslar projeye göre filtrelenir. Global ID tahmin edilebilse de tenant erişimi ayrıca zorunludur.
 
 ## Event sözleşmesi
 
@@ -102,7 +102,7 @@ stateDiagram-v2
 - Slack/resync HTTP sırasında transaction tutulmaz. API fetch timeout 15 saniyedir.
 - Hata: exponential backoff `min(300000,1000*2^attempt)` + jitter. `Retry-After` veya GitHub rate reset daha geçse o zamana ertelenir. Altı başarısız deneme → dead-letter; hata metni ve attempt sayısı tutulur. 401/403 gibi kalıcı hatalar da PoC'de aynı deneme bütçesini tüketir.
 - En az bir kez yürütme semantiği. Tek worker önerilir; birden fazla worker için lease fencing, entity-partitioned queue ve provider bazlı rate limiter eklenmelidir.
-- Scheduler dakikada bir deadline tarar ve beş dakikalık zaman dilimi başına bir resync job'ı oluşturur. Kesinti sonrası bir sonraki tarama kalıcı durumu toparlar.
+- Scheduler dakikada bir deadline tarar ve beş dakikalık zaman dilimi başına bir resync job'ı oluşturur. Aynı proje için pending/running resync varken ikinci job oluşturulmaz; ayrıca `resync_state` lease'i ikinci worker'ın aynı projeyi eşzamanlı taramasını engeller. Kesinti sonrası bir sonraki tarama kalıcı durumu toparlar.
 
 ## Idempotency ve ordering
 
@@ -118,7 +118,7 @@ stateDiagram-v2
 | Slack action | İmzalı form body hash'i ve side effect aynı transaction |
 | Deadline | `deadline:{task_id}:{due_date}` unique event |
 
-GitHub senkronizasyonu webhook ve resync arasında ortak ingest fonksiyonunu kullanır. Zaman damgaları geçerli ISO tarihleri için zaman dilimleri dikkate alınarak karşılaştırılır; aynı timestamp'li çelişkili değişikliklerin tam nedensellik çözümü PoC sınırıdır. Commit olayları SHA/görev bazında tekilleştirilir. Açık PR'ın içerik güncellemesi `pr.updated` üretir; tekrar açılış bildirimi ve açılış automation'ı üretmez.
+GitHub senkronizasyonu webhook ve resync arasında ortak ingest fonksiyonunu kullanır. Zaman damgaları geçerli ISO tarihleri için zaman dilimleri dikkate alınarak karşılaştırılır; aynı timestamp'li çelişkili değişikliklerin tam nedensellik çözümü PoC sınırıdır. Commit olayları SHA/görev bazında tekilleştirilir. Açık PR'ın içerik güncellemesi `pr.updated` üretir; tekrar açılış bildirimi ve açılış automation'ı üretmez. Commit ve issue listeleri son başarılı taramadan sonra GitHub'ın `since` filtresiyle alınır; günde en az bir kez tam tarama yapılır. PR/review/check/release uçlarında güvenilir `since` filtresi olmadığı için bunlar proje kapsamındaki snapshot deduplication ile tekrar okunur.
 
 Dış kayıt değişmese bile görev ilişkileri yeniden değerlendirilir. Yeni bir commit/PR bağlantısından sonra aynı projenin kayıtlı PR, check ve review nesneleri taranır; PR bağlantıları review'lardan önce tamamlanır. Yalnızca yeni bulunan görev ilişkileri için nesnenin en güncel durumuna ait görev eventi üretilir. Eski webhook verisi saklanan yeni durumu değiştiremez. Kuyrukta bekleyen PR olayları güncel PR yaşam döngüsüyle karşılaştırılır; eski CI sonuçları da güncel snapshot karşısında kontrol edilir. Geçersizleşmiş olaylar geçmişte kalır ancak durum/yorum automation'ı uygulamaz. Yeni PR başlığı gibi yaşam döngüsünü değiştirmeyen güncellemeler bekleyen açılış/merge automation'ını engellemez.
 
@@ -149,9 +149,11 @@ Her proje erişiminde org üyeliği kontrol edilir. Task, parent, kolon, reply v
 
 Parolalar rastgele salt ile scrypt kullanır. Bearer session tokeni 7 gün geçerli, DB'de SHA-256 hash halinde tutulur. Web istemcisi sessionStorage, extension SecretStorage kullanır. Cookie auth olmadığı için mutasyonlar ambient cookie üzerinden yetki almaz. OAuth state tek kullanımlık, 10 dakika süreli, kullanıcı/org/provider'a bağlıdır. Webhook HMAC karşılaştırması constant-time yapılır, Slack timestamp toleransı 5 dakikadır.
 
+Rate limit varsayılan olarak socket adresini kullanır. Uygulama yalnızca güvenilir Cloudflare Tunnel arkasında çalışıyorsa `TRUST_PROXY=cloudflare` ile `CF-Connecting-IP` başlığı kullanılabilir; bu ayar doğrudan internete açık bir sunucuda açılmamalıdır.
+
 ## Büyüme yolu
 
-1. SQLite → PostgreSQL, gerçek migration runner, composite tenant foreign key ve Row Level Security.
+1. SQLite → PostgreSQL, migration runner'ın sürüm sözleşmesini koruyarak composite tenant foreign key ve Row Level Security.
 2. Aynı transactional outbox sözleşmesini koruyarak worker'ı PostgreSQL `SKIP LOCKED` veya message broker'a taşıma; entity partitioning ve fencing.
 3. GitHub App installation tokenleri, dar izinler, provider başına rate-limit bütçesi, incremental resync cursor, tombstone reconciliation.
 4. Kalıcı GitHub command log üzerindeki belirsiz sonuçları provider durumuyla otomatik doğrulama. Slack belirsiz teslimleri için reconciliation ve açık delivery status.

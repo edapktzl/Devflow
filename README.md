@@ -56,6 +56,7 @@ Arayüz: <http://localhost:3000>
 | Değişken | Kullanım |
 | --- | --- |
 | `PUBLIC_URL` | OAuth callback ve Slack butonlarındaki dış adres |
+| `TRUST_PROXY` | Yalnızca güvenilir Cloudflare Tunnel arkasında `cloudflare` olarak ayarlayın; rate limit için `CF-Connecting-IP` kullanılır |
 | `TOKEN_KEY` | OAuth tokenlarını AES-256-GCM ile şifrelemek için 64 hex karakter |
 | `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth App secret |

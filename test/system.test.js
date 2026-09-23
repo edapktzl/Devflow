@@ -63,6 +63,17 @@ test('login, organization, board and tenant boundaries',async()=>{assert.equal((
 test('organization teams list assigned members and enforce organization roles',async()=>{const ownerId=(await api('/me')).id;const created=await api(`/organizations/${org}/teams`,'POST',{name:'Platform',members:[ownerId]});const teams=await api(`/organizations/${org}/teams`);assert.deepEqual(teams.find(team=>team.id===created.id),{id:created.id,org_id:org,name:'Platform',members:[{id:ownerId,name:'owner'}]});assert.equal((await request(`/api/organizations/${org}/teams`,'GET',undefined,outsider)).status,403);assert.equal((await request(`/api/organizations/${org}/teams`,'POST',{name:'Forbidden'},viewer)).status,403);});
 test('task validation, idempotency and optimistic concurrency',async()=>{const payload={title:'Idempotent task'};const headers={'Idempotency-Key':'create-once'};const a=await api(`/projects/${pid}/tasks`,'POST',payload,owner,headers);const b=await api(`/projects/${pid}/tasks`,'POST',payload,owner,headers);assert.equal(a.id,b.id);assert.equal((await request(`/api/projects/${pid}/tasks`,'POST',{title:'Different'},owner,headers)).status,409);const t=await api(`/tasks/${tid}`);await api(`/tasks/${tid}`,'PATCH',{version:t.version,description:'Updated'});assert.equal((await request(`/api/tasks/${tid}`,'PATCH',{version:t.version,title:'Stale'})).status,409);assert.equal((await request(`/api/projects/${pid}/tasks`,'POST',{title:'Bad',assignee:(await api('/me','GET',undefined,outsider)).id})).status,400);});
 test('project-scoped columns, subtasks, messages and mentions',async()=>{const other=(await api(`/organizations/${org}/projects`,'POST',{name:'Other project'})).id;const col=(await api(`/projects/${other}/board`)).columns[0].id;assert.equal((await request(`/api/projects/${pid}/tasks`,'POST',{title:'Bad',column_id:col})).status,400);const sub=await api(`/projects/${pid}/tasks`,'POST',{title:'Subtask',parent_id:tid});assert.equal(sub.parent_id,tid);const m=await api(`/projects/${pid}/messages`,'POST',{body:`@owner TASK-${tid} hazır`});assert.deepEqual(m.links.tasks,[tid]);assert.equal(m.links.users.length,1);assert.equal((await request(`/api/projects/${other}/messages`,'POST',{body:'Cross project',reply_to:m.id})).status,400);await drain();assert.ok((await api('/notifications')).length);});
+test('custom Kanban columns can be created and fully reordered',async()=>{
+ const board=await api(`/projects/${pid}/board`);
+ const created=await api(`/projects/${pid}/columns`,'POST',{board_id:board.boards[0].id,name:'QA'});
+ const withCustom=await api(`/projects/${pid}/board`);
+ assert.equal(withCustom.columns.at(-1).id,created.id);
+ const reversed=withCustom.columns.map(column=>column.id).reverse();
+ await api(`/projects/${pid}/columns/order`,'PUT',{ids:reversed});
+ assert.deepEqual((await api(`/projects/${pid}/board`)).columns.map(column=>column.id),reversed);
+ assert.equal((await request(`/api/projects/${pid}/columns/order`,'PUT',{ids:reversed.slice(1)})).status,400);
+ assert.equal((await request(`/api/projects/${pid}/columns/order`,'PUT',{ids:[...reversed.slice(0,-1),reversed.at(-1),reversed.at(-1)]})).status,400);
+});
 async function webhook(event,body,delivery=id()){const raw=JSON.stringify(body);return request('/webhooks/github','POST',raw,'',{'X-GitHub-Event':event,'X-GitHub-Delivery':delivery,'X-Hub-Signature-256':signature(process.env.GITHUB_WEBHOOK_SECRET,raw)});}
 test('signed GitHub commit → PR → merge workflow; replay dedup and ordering',async()=>{run('UPDATE projects SET repo=? WHERE id=?','test/repo',pid);const repo={full_name:'test/repo'};assert.equal((await request('/webhooks/github','POST',{repository:repo},'',{'X-Hub-Signature-256':'bad'})).status,401);const commit={id:'abc123',message:`TASK-${tid} fix login`,url:'https://github.com/test/repo/commit/abc123',timestamp:'2026-09-20T10:00:00Z'};for(let i=0;i<5;i++)assert.equal((await webhook('push',{repository:repo,commits:[commit]},'same-delivery')).status,200);await drain();assert.equal(get('SELECT count(*) AS n FROM task_links WHERE task_id=? AND kind=?',tid,'commit').n,1);const pr={number:74,title:`TASK-${tid} Login`,state:'open',merged:false,head:{sha:'abc123',ref:`task/${tid}-login`},updated_at:'2026-09-20T11:00:00Z',html_url:'https://github.com/test/repo/pull/74'};await webhook('pull_request',{repository:repo,pull_request:pr});await drain();assert.equal((await api(`/tasks/${tid}`)).status,'Review');await webhook('pull_request',{repository:repo,pull_request:{...pr,state:'closed',merged:true,updated_at:'2026-09-20T12:00:00Z'}});await drain();assert.equal((await api(`/tasks/${tid}`)).status,'Done');await webhook('pull_request',{repository:repo,pull_request:pr});await drain();assert.equal((await api(`/tasks/${tid}`)).status,'Done');const count=get('SELECT count(*) AS n FROM notifications').n;await webhook('pull_request',{repository:repo,pull_request:{...pr,state:'closed',merged:true,updated_at:'2026-09-20T12:00:00Z'}});await drain();assert.equal(get('SELECT count(*) AS n FROM notifications').n,count);});
 test('CI failure links by commit and executes database-defined automation',async()=>{tx(()=>ingest(pid,'check',{id:10,head_sha:'abc123',conclusion:'failure',completed_at:'2026-09-20T13:00:00Z',html_url:'https://github.com/test/repo/actions/runs/10'}));await drain();assert.ok((await api(`/tasks/${tid}`)).comments.some(c=>c.body.includes('CI failed')));});
@@ -87,11 +98,36 @@ test('OAuth provider failures return safe actionable errors without secrets',asy
  const start=await api(`/organizations/${org}/oauth/slack`,'POST',{}),state=new URL(start.url).searchParams.get('state');const original=globalThis.fetch;try{globalThis.fetch=async(url,options)=>String(url).startsWith(base)?original(url,options):new Response(JSON.stringify({ok:false,error:'invalid_code'}),{status:200});const rejected=await request(`/oauth/slack/callback?state=${state}&code=bad`);assert.equal(rejected.status,502);assert.equal(rejected.body.error,'slack OAuth authorization failed: invalid_code');
  const retry=await api(`/organizations/${org}/oauth/slack`,'POST',{}),retryState=new URL(retry.url).searchParams.get('state');globalThis.fetch=async(url,options)=>{if(String(url).startsWith(base))return original(url,options);throw Object.assign(new Error('network unavailable'),{cause:{code:'EACCES'}})};const unavailable=await request(`/oauth/slack/callback?state=${retryState}&code=network`);assert.equal(unavailable.status,502);assert.equal(unavailable.body.error,'slack OAuth token exchange unavailable');}finally{globalThis.fetch=original;}
 });
+test('GitHub OAuth identity failures return a safe provider error',async()=>{
+ process.env.GITHUB_CLIENT_ID='fixture-client';process.env.GITHUB_CLIENT_SECRET='fixture-secret';
+ const start=await api(`/organizations/${org}/oauth/github`,'POST',{}),state=new URL(start.url).searchParams.get('state');
+ const original=globalThis.fetch;
+ try{
+  globalThis.fetch=async(url,options)=>{
+   if(String(url).startsWith(base))return original(url,options);
+   if(url==='https://github.com/login/oauth/access_token')return new Response(JSON.stringify({access_token:'identity-test-token'}));
+   if(url==='https://api.github.com/user')throw Object.assign(new Error('network unavailable'),{cause:{code:'ETIMEDOUT'}});
+   throw Error('Unexpected fixture URL '+url);
+  };
+  const result=await request(`/oauth/github/callback?state=${state}&code=identity-network`);
+  assert.equal(result.status,502);
+  assert.equal(result.body.error,'github OAuth identity lookup unavailable');
+ }finally{globalThis.fetch=original;}
+});
 test('resync recovers missed PR merge through real adapter and deduplicates repeat scans',async()=>{
  const t=await api(`/projects/${pid}/tasks`,'POST',{title:'Resync recovery',column_id:columns.find(c=>c.name==='In Progress').id,assignee:(await api('/me')).id});
  const pr={number:88,title:`TASK-${t.id} recover missed merge`,state:'closed',merged:true,updated_at:'2026-09-20T15:00:00Z',head:{sha:'resync-sha'},html_url:'https://github.com/test/repo/pull/88'};
  const original=globalThis.fetch;let calls=0;
  try{globalThis.fetch=async(url,options)=>{if(String(url).startsWith(base))return original(url,options);calls++;const u=new URL(url);assert.equal(u.origin,'https://api.github.com');let body=[];if(u.pathname.endsWith('/pulls'))body=[pr];if(u.pathname.endsWith('/pulls/88'))body=pr;if(u.pathname.endsWith('/check-runs'))body={check_runs:[]};return new Response(JSON.stringify(body));};await resync(pid);await drain();assert.equal((await api(`/tasks/${t.id}`)).status,'Done');const n=get('SELECT count(*) AS n FROM events WHERE task_id=?',t.id).n;await resync(pid);await drain();assert.equal(get('SELECT count(*) AS n FROM events WHERE task_id=?',t.id).n,n);assert.ok(calls>=12);}finally{globalThis.fetch=original;}
+});
+test('resync queue prevents overlapping jobs for one project',()=>{
+ run("DELETE FROM jobs WHERE kind='resync'");
+ const first=enqueue('resync-test-1','resync',{project_id:pid});
+ assert.equal(first,undefined);
+ schedule();
+ const active=all("SELECT * FROM jobs WHERE kind='resync' AND status IN ('pending','running') AND json_extract(payload,'$.project_id')=?",pid);
+ assert.equal(active.length,1);
+ run("DELETE FROM jobs WHERE kind='resync'");
 });
 test('Slack outbound failure remains durable, then sends interactive message on retry',async()=>{
  run('INSERT INTO integrations VALUES(?,?,?,?)',org,'slack',crypt('slack-adapter-token'),'T123');enqueue('outbound-fixture','slack',{project_id:pid,task_id:tid,text:'task assigned'});

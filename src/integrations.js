@@ -72,19 +72,44 @@ export function githubDelivery(data){
  if(b.check_suite)ingest(p.id,'check',b.check_suite);
  if(b.release)ingest(p.id,'release',b.release,'release.created');
 }
+function claimResync(pid){
+ const started=now(),lease=started+30*60*1000;
+ return tx(()=>{
+  const state=get('SELECT lease_until FROM resync_state WHERE project_id=?',pid);
+  if(state?.lease_until&&state.lease_until>started)return false;
+  run(`INSERT INTO resync_state(project_id,last_completed,last_full,lease_until,last_error)
+       VALUES(?,?,?,?,NULL)
+       ON CONFLICT(project_id) DO UPDATE SET lease_until=excluded.lease_until,last_error=NULL`,pid,null,null,lease);
+  return true;
+ });
+}
+
 export async function resync(pid){
  const p=get('SELECT * FROM projects WHERE id=? AND deleted_at IS NULL',pid);if(!p?.repo)return;
+ if(!claimResync(pid))return {skipped:true};
+ const started=now(),state=get('SELECT last_completed,last_full FROM resync_state WHERE project_id=?',pid);
+ const full=!state?.last_full||started-state.last_full>=24*60*60*1000;
+ const since=!full&&state?.last_completed?`&since=${encodeURIComponent(new Date(state.last_completed).toISOString())}`:'';
  const root=`/repos/${p.repo}`;
- const branches=await pages(p.org_id,`${root}/branches`);for(const b of branches)tx(()=>ingest(pid,'branch',b));
- // Walk all current branches; duplicate commits collapse at their SHA.
- for(const branch of branches){const commits=await pages(p.org_id,`${root}/commits?sha=${encodeURIComponent(branch.name)}`);for(const c of commits)tx(()=>ingest(pid,'commit',{...c,message:c.commit.message,updated_at:c.commit.committer.date}));}
- for(const issue of await pages(p.org_id,`${root}/issues?state=all`))if(!issue.pull_request)tx(()=>ingest(pid,'issue',issue));
- for(const item of await pages(p.org_id,`${root}/pulls?state=all`)){
- const pr=await external('github',p.org_id,`${root}/pulls/${item.number}`);tx(()=>ingest(pid,'pr',pr));
- for(const r of await pages(p.org_id,`${root}/pulls/${item.number}/reviews`))tx(()=>ingest(pid,'review',{...r,pull_request_number:pr.number,head:pr.head,title:pr.title,updated_at:r.submitted_at}));
- for(let page=1;page<=100;page++){const checks=await external('github',p.org_id,`${root}/commits/${pr.head.sha}/check-runs?per_page=100&page=${page}`);for(const c of checks.check_runs)tx(()=>ingest(pid,'check',c));if(checks.check_runs.length<100)break;if(page===100)throw Error('Check pagination limit');}
+ try{
+  const branches=await pages(p.org_id,`${root}/branches`);for(const b of branches)tx(()=>ingest(pid,'branch',b));
+  // Commits and issues support incremental snapshots; a full scan still runs daily.
+  for(const branch of branches){const commits=await pages(p.org_id,`${root}/commits?sha=${encodeURIComponent(branch.name)}${since}`);for(const c of commits)tx(()=>ingest(pid,'commit',{...c,message:c.commit.message,updated_at:c.commit.committer.date}));}
+  for(const issue of await pages(p.org_id,`${root}/issues?state=all${since}`))if(!issue.pull_request)tx(()=>ingest(pid,'issue',issue));
+  // GitHub does not provide a reliable `since` filter for pull requests/reviews/checks;
+  // these snapshots remain project-scoped and are deduplicated by external_objects.
+  for(const item of await pages(p.org_id,`${root}/pulls?state=all`)){
+   const pr=await external('github',p.org_id,`${root}/pulls/${item.number}`);tx(()=>ingest(pid,'pr',pr));
+   for(const r of await pages(p.org_id,`${root}/pulls/${item.number}/reviews`))tx(()=>ingest(pid,'review',{...r,pull_request_number:pr.number,head:pr.head,title:pr.title,updated_at:r.submitted_at}));
+   for(let page=1;page<=100;page++){const checks=await external('github',p.org_id,`${root}/commits/${pr.head.sha}/check-runs?per_page=100&page=${page}`);for(const c of checks.check_runs)tx(()=>ingest(pid,'check',c));if(checks.check_runs.length<100)break;if(page===100)throw Error('Check pagination limit');}
+  }
+  for(const release of await pages(p.org_id,`${root}/releases`))tx(()=>ingest(pid,'release',release,'release.created'));
+  const completed=now();tx(()=>run('UPDATE resync_state SET last_completed=?,last_full=?,lease_until=NULL,last_error=NULL WHERE project_id=?',completed,full?completed:(state?.last_full||null),pid));
+  return {skipped:false,full};
+ }catch(error){
+  tx(()=>run('UPDATE resync_state SET lease_until=NULL,last_error=? WHERE project_id=?',String(error.message).slice(0,500),pid));
+  throw error;
  }
- for(const release of await pages(p.org_id,`${root}/releases`))tx(()=>ingest(pid,'release',release,'release.created'));
 }
 export function processEvent(eid){
  const e=get('SELECT * FROM events WHERE id=?',eid),payload=JSON.parse(e.payload),p=get('SELECT * FROM projects WHERE id=? AND deleted_at IS NULL',e.project_id);if(!p)return;
