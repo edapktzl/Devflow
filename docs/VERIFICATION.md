@@ -12,6 +12,7 @@
 - Kayıt akışı: aynı sayfada ayrı kayıt kutusu, başarılı kayıt sonrası e-posta dolu ve şifre boş giriş formuna dönüş, hatalı/tekrarlanan kayıtta hata gösterimi doğrulandı. Sunucu bozuk e-postaları ve uygunsuz kullanıcı adı/şifreleri reddeder.
 
 - GitHub outbound tekrar koruması: issue/yorum/label/branch/kapatma/merge tekrarları, eşzamanlı istekler, değişen içerik/proje/repository, güncel yetkiler, merge ön kontrolü, 4xx/timeout/5xx/geçersiz yanıt ve yerel kayıt hatası test edildi. Yeni süreç aynı SQLite dosyasından tamamlanan sonucu okur; gönderim sırasında öldürülen sürecin işlemi yeniden gönderilmez. Başarı olayı ve resync işi tek kez oluşur.
+- Görev detay ekranı: bağlantılar ve yorumların altında aktivite geçmişi, olay türü, kaynak, aktör ve zaman bilgisi gösterilir. Gerçek Chromium akışında görev oluşturma olayı doğrulandı.
 
 ## Canlı bağlantılarda doğrulananlar
 

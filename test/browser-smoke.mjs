@@ -69,6 +69,7 @@ try{
  // Worker executes the exact same durable queue handlers as the standalone process.
  while(await tick()){}
  await evaluate("document.querySelector('.card').click()");await until("document.querySelector('#taskDialog').open");
+ assert.ok(await evaluate("!!document.querySelector('[data-activity-type=\\\"task.created\\\"]')"),'Task activity is visible');
  await evaluate(`(()=>{const f=document.querySelector('#taskForm');f.elements.column_id.selectedIndex=2;f.requestSubmit();})()`);
  await until("document.querySelectorAll('.column')[2].querySelector('.card')!==null");
  while(await tick()){}
