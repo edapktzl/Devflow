@@ -6,6 +6,13 @@ async function api(path,method='GET',body){const r=await fetch('/api'+path,{meth
 const safe=fn=>async(...args)=>{try{await fn(...args);}catch(e){notice(e.message,true);}};
 function options(el,items,value='id',label='name'){el.innerHTML=items.map(i=>`<option value="${esc(i[value])}">${esc(i[label])}</option>`).join('');}
 const teamManager=createTeamManager({api,esc,safe,getOrg:()=>org,getMembers:()=>members,getUserId:()=>me?.id,notice,refreshSettings:()=>settings()});
+function clearWorkspaceState(){
+ streamController?.abort();streamController=null;pid='';board=undefined;selected=undefined;members=[];
+ $('#heading').textContent='Engineering workspace';
+ $('#kanban').innerHTML='';$('#messages').innerHTML='';$('#feed').innerHTML='';$('#notifications').innerHTML='';
+ $('#members').innerHTML='';$('#rules').innerHTML='';$('#repoList').textContent='';
+ for(const id of ['repoForm','slackForm','slackIdentityForm','ruleForm'])document.getElementById(id)?.reset();
+}
 function authView(register){
  $('#authForm').hidden=register;$('#registerForm').hidden=!register;
  $('#registerNotice').hidden=true;notice('');
@@ -32,7 +39,7 @@ async function loadOrg(){streamController?.abort();if(!org){$('#kanban').innerHT
 async function loadProject(){streamController?.abort();$('#heading').textContent=$('#project').selectedOptions[0]?.textContent||'Engineering workspace';if(!pid){$('#kanban').innerHTML='<p class="empty">Organizasyonunuza bir proje ekleyin.</p>';return;}await refresh();connectStream();const deep=new URLSearchParams(location.search).get('task');if(deep){history.replaceState({},'','/');await openTask(Number(deep));}}
 async function refresh(){if(tab==='inbox'){await inbox();return;}if(tab==='settings'){await settings();return;}if(!pid)return;if(tab==='board'){board=await api(`/projects/${pid}/board`);renderBoard();}if(tab==='chat')await chat();if(tab==='activity')await activity();}
 function connectStream(){streamController=new AbortController();const signal=streamController.signal;const streamPid=pid;(async()=>{let cursor=0;while(!signal.aborted){try{const r=await fetch(`/api/projects/${streamPid}/stream?after=${cursor}`,{headers:{Authorization:`Bearer ${token}`},signal});if(!r.ok)throw Error('Stream unavailable');$('#connection').textContent='● Canlı bağlantı';const reader=r.body.getReader(),decoder=new TextDecoder();let buffer='';while(!signal.aborted){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parts=buffer.split('\n\n');buffer=parts.pop();let changed=false;for(const part of parts){const line=part.split('\n').find(x=>x.startsWith('id: '));if(line){cursor=Number(line.slice(4));changed=true;}}if(changed||tab==='inbox')await refresh();}}catch(e){if(signal.aborted)return;$('#connection').textContent='○ Yeniden bağlanıyor';}await new Promise(r=>setTimeout(r,2500));}})();}
-$('#org').onchange=safe(async()=>{org=$('#org').value;await loadOrg();});$('#project').onchange=safe(async()=>{pid=$('#project').value;await loadProject();});
+$('#org').onchange=safe(async()=>{clearWorkspaceState();org=$('#org').value;await loadOrg();});$('#project').onchange=safe(async()=>{pid=$('#project').value;await loadProject();});
 $('#newOrg').onclick=safe(async()=>{const name=prompt('Organizasyon adı');if(!name)return;await api('/organizations','POST',{name});await start();});
 $('#newProject').onclick=safe(async()=>{if(!org)throw Error('Önce organizasyon oluşturun');const name=prompt('Proje adı');if(!name)return;await api(`/organizations/${org}/projects`,'POST',{name});await loadOrg();});
 document.querySelectorAll('[data-tab]').forEach(btn=>btn.onclick=safe(async()=>{tab=btn.dataset.tab;document.querySelectorAll('.tab').forEach(el=>el.hidden=el.id!==tab);document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===btn));await refresh();}));
@@ -52,6 +59,7 @@ async function settings(){
  members=await api(`/organizations/${org}/members`);
  $('#members').innerHTML=members.map(m=>`<div class="item">${esc(m.name)} · ${esc(m.role)}<small>${esc(m.id)}</small></div>`).join('');
  await teamManager.render();
+ $('#slackIdentityForm').reset();
  const slackIdentities=await api(`/organizations/${org}/slack/identities`);
  const slackIdentity=slackIdentities[0];
  if(slackIdentity){$('#slackIdentityForm').elements.user_id.value=slackIdentity.user_id;$('#slackIdentityForm').elements.slack_user_id.value=slackIdentity.slack_user_id;}

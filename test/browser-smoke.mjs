@@ -55,6 +55,13 @@ try{
  assert.ok(await evaluate("!!document.querySelector('[data-team]')"),'Cancel preserves team');
  await evaluate("window.confirm=()=>true;document.querySelector('[data-delete-team]').click()");await until("!document.querySelector('[data-team]')");
  console.log('Team member removed, re-added, persisted after reload and team deleted');
+ await evaluate("window.prompt=()=> 'Empty organization';document.querySelector('#newOrg').click()");await until("document.querySelector('#org').options.length===2");
+ await evaluate("document.querySelector('#org').selectedIndex=1;document.querySelector('#org').dispatchEvent(new Event('change',{bubbles:true}))");
+ await until("document.querySelector('#project').options.length===0 && document.querySelector('#kanban').textContent.includes('Organizasyonunuza')");
+ assert.equal(await evaluate("document.querySelector('#repoForm').elements.repo.value"),'','Organization switch clears project integration forms');
+ await evaluate("document.querySelector('#org').selectedIndex=0;document.querySelector('#org').dispatchEvent(new Event('change',{bubbles:true}))");await until("document.querySelector('#project').options.length===1");
+ await evaluate("document.querySelector('[data-tab=board]').click()");await until("document.querySelectorAll('.column').length===5");
+ console.log('Switching to an empty organization clears the previous project state');
  await evaluate("document.querySelector('[data-tab=board]').click()");await until("!document.querySelector('#board').hidden");
  await evaluate("document.querySelector('#newTask').click()");await until("document.querySelector('#taskDialog').open");
  await evaluate(`(()=>{const f=document.querySelector('#taskForm');f.elements.title.value='Login validation';f.elements.assignee.selectedIndex=1;f.elements.labels.value='bug, auth';f.requestSubmit();})()`);
