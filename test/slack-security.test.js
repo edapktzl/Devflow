@@ -9,7 +9,7 @@ process.env.SLACK_CLIENT_SECRET='slack-security-secret';
 
 const {server}=await import('../src/server.js');
 const {all,get,run,crypt,signature,now}=await import('../src/core.js');
-let base,owner,org,pid,tid,ownerId;
+let base,owner,org,pid,tid,ownerId,memberToken,viewerToken;
 
 async function request(path,method='GET',body,token=owner,headers={}){
  const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token||''}`,...headers},body:body===undefined?undefined:typeof body==='string'?body:JSON.stringify(body)});
@@ -28,6 +28,10 @@ before(async()=>{
  org=(await api('/organizations','POST',{name:'Slack Security'})).id;
  pid=(await api(`/organizations/${org}/projects`,'POST',{name:'Slack Project'})).id;
  tid=(await api(`/projects/${pid}/tasks`,'POST',{title:'Slack action'})).id;
+ const member=await createUser('slack-member@test.dev','slack-member');memberToken=member.token;
+ const viewer=await createUser('slack-viewer@test.dev','slack-viewer');viewerToken=viewer.token;
+ await api(`/organizations/${org}/members`,'POST',{email:'slack-member@test.dev',role:'Member'});
+ await api(`/organizations/${org}/members`,'POST',{email:'slack-viewer@test.dev',role:'Viewer'});
  run('INSERT INTO integrations VALUES(?,?,?,?)',org,'slack',crypt('slack-secret-token'),'TSEC');
  run('UPDATE projects SET slack_channel=? WHERE id=?','CSEC',pid);
  await api(`/organizations/${org}/slack/identities`,'POST',{user_id:ownerId,slack_user_id:'USEC'});
@@ -59,6 +63,26 @@ test('interactive action uses the Slack actor and canonical duplicate protection
 test('malformed Slack interactive payload is rejected as a client error',async()=>{
  const {raw,headers}=signed('payload=%7Bnot-json');
  assert.equal((await request('/webhooks/slack','POST',raw,'',headers)).status,400);
+});
+
+test('Slack webhook rejects invalid signatures and mismatched actors or channels',async()=>{
+ const payload={team:{id:'TSEC'},channel:{id:'CSEC'},user:{id:'USEC'},actions:[{action_id:'assign',value:String(tid)}]};
+ const valid=signed(new URLSearchParams({payload:JSON.stringify(payload)}).toString());
+ assert.equal((await request('/webhooks/slack','POST',valid.raw,'',{...valid.headers,'X-Slack-Signature':'v0=invalid'})).status,401);
+ const wrongChannel=signed(new URLSearchParams({payload:JSON.stringify({...payload,channel:{id:'COTHER'}})}).toString());
+ assert.equal((await request('/webhooks/slack','POST',wrongChannel.raw,'',wrongChannel.headers)).status,403);
+ const unknownActor=signed(new URLSearchParams({payload:JSON.stringify({...payload,user:{id:'UUNKNOWN'}})}).toString());
+ assert.equal((await request('/webhooks/slack','POST',unknownActor.raw,'',unknownActor.headers)).status,403);
+});
+
+test('Member and Viewer cannot manage Slack integration settings',async()=>{
+ for(const token of [memberToken,viewerToken]){
+  assert.equal((await request(`/api/organizations/${org}/oauth/slack`,'POST',{},token)).status,403);
+  assert.equal((await request(`/api/organizations/${org}/slack/identities`,'POST',{user_id:ownerId,slack_user_id:'UOTHER'},token)).status,403);
+  assert.equal((await request(`/api/organizations/${org}/integrations/slack`,'DELETE',{},token)).status,403);
+  assert.equal((await request(`/api/projects/${pid}`,'PATCH',{slack_channel:'COTHER'},token)).status,403);
+ }
+ assert.deepEqual(await api(`/organizations/${org}/integrations`,'GET',undefined,memberToken),[{provider:'slack',external_id:'TSEC'}]);
 });
 
 test('Slack OAuth rejects a response without a workspace identity',async()=>{
