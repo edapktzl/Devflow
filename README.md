@@ -75,7 +75,8 @@ Arayüz: <http://localhost:3000>
 3. `GITHUB_CLIENT_ID` ve `GITHUB_CLIENT_SECRET` değerlerini `.env` dosyasına ekleyip API ve worker'ı yeniden başlatın.
 4. DevFlow'da **Bağlantılar ve ekip → GitHub bağla** seçeneğini kullanın.
 5. **Repository listele** ile repository'leri görüntüleyin ve `owner/repository` biçiminde bir projeyle eşleyin.
-6. Repository ayarlarında **Webhooks → Add webhook** bölümünü açın:
+6. Proje seçiliyken GitHub ayarlarındaki işlem alanından issue oluşturma/kapatma, yorum, etiket, branch ve PR merge işlemlerini başlatabilirsiniz. Bu işlemler gerçek GitHub verisini değiştirir; form gönderimden önce onay ister ve aynı işlemin tekrarlanmaması için idempotency anahtarı kullanır.
+7. Repository ayarlarında **Webhooks → Add webhook** bölümünü açın:
 
    - Payload URL: `https://YOUR_HOST/webhooks/github`
    - Content type: `application/json`

@@ -2,7 +2,7 @@
 
 ## Otomatik doğrulama
 
-- `npm.cmd test`: **52/52 başarılı**. Gerçek Node HTTP sunucusu, bellek içi SQLite ve yeniden başlatma testlerinde geçici SQLite dosyası kullanılır; harici provider yanıtları test fixture'larıdır.
+- `npm.cmd test`: **54/54 başarılı**. Gerçek Node HTTP sunucusu, bellek içi SQLite ve yeniden başlatma testlerinde geçici SQLite dosyası kullanılır; harici provider yanıtları test fixture'larıdır. Legacy `idempotency` tablosundaki varsayılan zaman sütunu ile geriye dönük yazma uyumluluğu ve GitHub işlem formunun statik arayüz bağlantısı da doğrulanır.
 - Kapsam: login, roller/tenant izolasyonu, takım üyeliği/silme, görevler, özel Kanban kolonu ve sıralaması, yorum/mention, GitHub imzası ve görev ilişkileri, GitHub OAuth hata yönetimi, Slack imzası/aksiyonları, retry/dead-letter, SSE, automation, deadline, proxy rate limit ve transaction kilidi.
 - Olay sıralaması: PR/CI/review commit'ten önce gelse de bağlantılar tamamlanır; değişmemiş resync snapshot'ları eksik ilişkileri onarır; tekrar işleme görev bildirimi ve CI yorumunu çoğaltmaz.
 - Gecikmiş olaylar: eski PR açılışı merge edilmiş görevi geri taşımaz; başarıyla sonuçlanmış check için bekleyen eski hata automation'ı çalışmaz. PR başlığı güncellemesi bekleyen geçerli açılış/merge işlemini engellemez.
@@ -26,7 +26,7 @@
 - VS Code'dan gerçek commit/push → PR → Review → CI/review → merge → Done zinciri tek görev üzerinde baştan sona kabul edilmedi.
 - Docker Compose yapılandırma kontrolü başarılı; Docker engine erişilebilir olmadığı için container build/runtime doğrulaması tamamlanmadı.
 - GitHub outbound işlemlerinin belirsiz sonuçları otomatik uzlaştırılmaz. Timeout/5xx veya çökme sonrası aynı anahtar yeniden gönderilmez; GitHub'da sonuç kontrolü gerekir. Bu davranış izole testlerle doğrulandı; canlı issue/yorum oluşturulmadı.
-- OAuth token yenileme, bazı ekran iyileştirmeleri ve otomatik GitHub Actions test çalıştırması henüz tamamlanmadı.
+- OAuth token yenileme, GitHub işlem formunun gerçek provider kabul testi ve otomatik GitHub Actions test çalıştırması henüz tamamlanmadı. Form doğrulaması ve backend çağrısı izole testlerle kontrol edilir; canlı issue, yorum, etiket, branch veya merge oluşturulmaz.
 - API/worker yerel makinede, dış erişim Cloudflare Tunnel üzerinden çalışır; kalıcı deployment değildir.
 
 Bu kayıt production hazır olma iddiası değildir. Test senaryoları canlı entegrasyon kabulünden ayrı değerlendirilir.

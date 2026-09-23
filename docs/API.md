@@ -111,7 +111,7 @@ Idempotency-Key: issue-login-001
 {"action":"create_issue","title":"TASK-142 Login validation","body":"Details"}
 ```
 
-Başarıda GitHub'ın JSON yanıtı 200 ile döner; aynı anahtarla tekrarında saklanan yanıt kullanılır. Olay, audit başarı kaydı ve resync işi çoğalmaz. Henüz süren isteğe 409 döner. Anahtar olmadan istek 400 ile reddedilir; GitHub'a gönderilmez. Mevcut web/extension akışı bu endpointi henüz kullanmaz.
+Başarıda GitHub'ın JSON yanıtı 200 ile döner; aynı anahtarla tekrarında saklanan yanıt kullanılır. Olay, audit başarı kaydı ve resync işi çoğalmaz. Henüz süren isteğe 409 döner. Anahtar olmadan istek 400 ile reddedilir; GitHub'a gönderilmez. DevFlow ayarlarındaki GitHub işlem formu bu endpointi kullanır ve gönderimden önce kullanıcı onayı ister; VS Code extension akışı henüz kullanmaz.
 
 `GET /projects/:pid/github/actions/:key` işlemi başlatan kullanıcıya durumunu döndürür. Güncel proje yazma yetkisi, merge için ayrıca Owner/Admin rolü gerekir. Durumlar:
 

@@ -2,7 +2,7 @@ import { createTeamManager } from './teams.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let token=sessionStorage.getItem('devflow-token'),me,org,pid,board,members=[],selected,tab='board',streamController,preferredPid;
 const notice=(message,error=false)=>{$('#notice').textContent=message;$('#notice').className=error?'error':'success';};
-async function api(path,method='GET',body){const r=await fetch('/api'+path,{method,headers:{Authorization:`Bearer ${token||''}`,'Content-Type':'application/json',...(method==='GET'?{}:{'Idempotency-Key':crypto.randomUUID()})},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error);return data;}
+async function api(path,method='GET',body,idempotencyKey){const r=await fetch('/api'+path,{method,headers:{Authorization:`Bearer ${token||''}`,'Content-Type':'application/json',...(method==='GET'?{}:{'Idempotency-Key':idempotencyKey||crypto.randomUUID()})},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error);return data;}
 const safe=fn=>async(...args)=>{try{await fn(...args);}catch(e){notice(e.message,true);}};
 function options(el,items,value='id',label='name'){el.innerHTML=items.map(i=>`<option value="${esc(i[value])}">${esc(i[label])}</option>`).join('');}
 const teamManager=createTeamManager({api,esc,safe,getOrg:()=>org,getMembers:()=>members,getUserId:()=>me?.id,notice,refreshSettings:()=>settings()});
@@ -11,7 +11,7 @@ function clearWorkspaceState(){
  $('#heading').textContent='Engineering workspace';
  $('#kanban').innerHTML='';$('#messages').innerHTML='';$('#feed').innerHTML='';$('#notifications').innerHTML='';
  $('#members').innerHTML='';$('#rules').innerHTML='';$('#repoList').textContent='';
- for(const id of ['repoForm','slackForm','slackIdentityForm','ruleForm'])document.getElementById(id)?.reset();
+ for(const id of ['repoForm','githubActionForm','slackForm','slackIdentityForm','ruleForm'])document.getElementById(id)?.reset();$('#githubActionResult').textContent='';
 }
 function authView(register){
  $('#authForm').hidden=register;$('#registerForm').hidden=!register;
@@ -62,6 +62,8 @@ $('#chatForm').onsubmit=safe(async e=>{e.preventDefault();await api(`/projects/$
 async function activity(){let events=[],cursor=0;for(;;){const batch=await api(`/projects/${pid}/activity?after=${cursor}`);events.push(...batch);if(batch.length<200)break;cursor=batch.at(-1).id;}$('#feed').innerHTML=events.reverse().slice(0,200).map(e=>`<div class="item"><span class="tag">${esc(e.source)}</span> <strong>${esc(e.type)}</strong> ${e.task_id?`TASK-${e.task_id}`:''}<small>${esc(new Date(e.created_at).toLocaleString())}</small><code>${esc(e.payload)}</code></div>`).join('')||'<p>Henüz aktivite yok.</p>';}
 async function inbox(){const ns=await api('/notifications');$('#notifications').innerHTML=ns.map(n=>`<div class="item">${n.read_at?'':'● '}${esc(n.type)} ${n.task_id?`TASK-${n.task_id}`:''}<small>${esc(new Date(n.created_at).toLocaleString())}</small><button data-read="${esc(n.id)}">${n.read_at?'Okundu':'Okundu işaretle'}</button></div>`).join('')||'<p>Bildirim yok.</p>';$('#notifications').querySelectorAll('[data-read]').forEach(b=>b.onclick=safe(async()=>{await api(`/notifications/${b.dataset.read}`,'PATCH',{read:true});await inbox();}));}
 async function settings(){
+ const githubActionForm=$('#githubActionForm');
+ if(githubActionForm)githubActionForm.hidden=!pid;
  if(!org){$('#members').innerHTML='<p class="empty">Önce bir organizasyon oluşturup seçin.</p>';$('#rules').innerHTML='';await teamManager.render();return;}
  members=await api(`/organizations/${org}/members`);
  $('#members').innerHTML=members.map(m=>`<div class="item">${esc(m.name)} · ${esc(m.role)}<small>${esc(m.id)}</small></div>`).join('');
@@ -75,6 +77,51 @@ async function settings(){
  $('#rules').innerHTML=rules.filter(r=>r.enabled).map(r=>`<div class="item">${esc(r.trigger)} → ${esc(r.action)}: ${esc(r.value)}<small>Koşul: ${esc(r.condition_status||'Yok')}</small><button data-rule="${esc(r.id)}">Devre dışı bırak</button></div>`).join('');
  $('#rules').querySelectorAll('[data-rule]').forEach(b=>b.onclick=safe(async()=>{await api(`/projects/${pid}/rules/${b.dataset.rule}`,'DELETE',{});await settings();}));
 }
+const githubActionFields={
+ create_issue:['title','body'],
+ close_issue:['number'],
+ comment:['number','body'],
+ labels:['number','labels'],
+ branch:['name','sha'],
+ merge:['number','sha']
+};
+function updateGithubActionFields(){
+ const form=$('#githubActionForm');if(!form)return;
+ const action=form.elements.action.value,visible=githubActionFields[action]||[];
+ form.querySelectorAll('[data-github-field]').forEach(label=>{
+  const input=label.querySelector('input,textarea');
+  const show=visible.includes(label.dataset.githubField);
+  label.hidden=!show;if(input)input.required=show;
+ });
+ const bodyLabel=form.querySelector('[data-github-body-label]');
+ if(bodyLabel)bodyLabel.textContent=action==='comment'?'Yorum':'Açıklama';
+}
+function githubActionPayload(form){
+ const action=form.elements.action.value;
+ const payload={action};
+ if(action==='create_issue'){
+  payload.title=form.elements.title.value.trim();payload.body=form.elements.body.value;
+ }else if(action==='close_issue'||action==='comment'||action==='labels'||action==='merge'){
+  payload.number=Number(form.elements.number.value);
+  if(action==='comment')payload.body=form.elements.body.value;
+  if(action==='labels')payload.labels=form.elements.labels.value.split(',').map(value=>value.trim()).filter(Boolean);
+  if(action==='merge')payload.sha=form.elements.sha.value.trim();
+ }else if(action==='branch'){
+  payload.name=form.elements.name.value.trim();payload.sha=form.elements.sha.value.trim();
+ }
+ return payload;
+}
+$('#githubActionType').onchange=()=>{const form=$('#githubActionForm');delete form.dataset.key;updateGithubActionFields();};
+$('#githubActionForm').addEventListener('input',event=>{if(event.target.name!=='action')delete event.currentTarget.dataset.key;});
+$('#githubActionForm').onsubmit=safe(async e=>{
+ e.preventDefault();if(!pid)throw Error('Önce bir proje oluşturup seçin.');
+ if(!confirm('Bu işlem gerçek GitHub verisini değiştirebilir. Devam etmek istiyor musunuz?'))return;
+ const form=e.target,key=form.dataset.key||crypto.randomUUID();form.dataset.key=key;
+ const result=await api(`/projects/${pid}/github/actions`,'POST',githubActionPayload(form),key);
+ $('#githubActionResult').textContent=JSON.stringify(result,null,2);notice('GitHub işlemi tamamlandı.');
+ delete form.dataset.key;form.reset();updateGithubActionFields();
+});
+updateGithubActionFields();
 for(const provider of ['github','slack'])$('#'+provider+'Connect').onclick=safe(async()=>{if(!org)throw Error('Önce bir organizasyon oluşturun.');const r=await api(`/organizations/${org}/oauth/${provider}`,'POST',{});location.href=r.url;});
 for(const [form,path,method] of [['repoForm',()=>`/projects/${pid}`,'PATCH'],['slackForm',()=>`/projects/${pid}`,'PATCH'],['memberForm',()=>`/organizations/${org}/members`,'POST'],['slackIdentityForm',()=>`/organizations/${org}/slack/identities`,'POST'],['ruleForm',()=>`/projects/${pid}/rules`,'POST']])$('#'+form).onsubmit=safe(async e=>{e.preventDefault();if(['repoForm','slackForm','ruleForm'].includes(form)&&!pid)throw Error('Önce bir proje oluşturup seçin.');if(['memberForm','slackIdentityForm'].includes(form)&&!org)throw Error('Önce bir organizasyon oluşturup seçin.');await api(path(),method,Object.fromEntries(new FormData(e.target)));notice('Kaydedildi');await settings();});
 $('#repos').onclick=safe(async()=>{const repos=await api(`/organizations/${org}/github/repositories`);$('#repoList').textContent=repos.map(r=>r.full_name).join('\n');});$('#resync').onclick=safe(async()=>{await api(`/projects/${pid}/github/resync`,'POST',{});notice('Senkronizasyon kuyruğa alındı');});
