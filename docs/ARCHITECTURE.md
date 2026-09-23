@@ -139,8 +139,9 @@ Bu, aynı anahtarla tekrar gönderimi önler; provider ile yerel DB arasında at
 | İşlem | Owner | Admin | Member | Viewer |
 |---|---|---|---|---|
 | Org/proje/task/chat/feed okuma | ✓ | ✓ | ✓ | ✓ |
+| Bağlı GitHub metadata'sı (commit/PR/issue/check) okuma | ✓ | ✓ | ✓ | ✓ |
 | Task, yorum, mesaj, kolon, proje oluşturma | ✓ | ✓ | ✓ | — |
-| Entegrasyon, repository listesi, automation, audit, job yönetimi | ✓ | ✓ | — | — |
+| Entegrasyon bağlantısı, repository listesi, automation, audit, job yönetimi | ✓ | ✓ | — | — |
 | Repo aksiyonu (merge hariç) | ✓ | ✓ | ✓ | — |
 | PR merge | ✓ | ✓ | — | — |
 | Admin rolü verme | ✓ | — | — | — |
