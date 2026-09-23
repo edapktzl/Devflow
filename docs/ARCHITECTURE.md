@@ -140,7 +140,7 @@ Bu, aynı anahtarla tekrar gönderimi önler; provider ile yerel DB arasında at
 |---|---|---|---|---|
 | Org/proje/task/chat/feed okuma | ✓ | ✓ | ✓ | ✓ |
 | Task, yorum, mesaj, kolon, proje oluşturma | ✓ | ✓ | ✓ | — |
-| Entegrasyon, automation, audit, job yönetimi | ✓ | ✓ | — | — |
+| Entegrasyon, repository listesi, automation, audit, job yönetimi | ✓ | ✓ | — | — |
 | Repo aksiyonu (merge hariç) | ✓ | ✓ | ✓ | — |
 | PR merge | ✓ | ✓ | — | — |
 | Admin rolü verme | ✓ | — | — | — |

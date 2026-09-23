@@ -47,7 +47,7 @@ Runtime liste: `GET /api/endpoints`. Başarılı JSON route'ları 200 döner. Ha
 | POST | `/organizations/:org/oauth/:provider` | Admin: github/slack OAuth URL'si oluştur |
 | POST | `/organizations/:org/slack/identities` | Admin: `{user_id,slack_user_id}` |
 | GET | `/organizations/:org/slack/identities` | Kullanıcının seçili organizasyondaki Slack eşlemeleri |
-| GET | `/organizations/:org/github/repositories` | Canlı API'den erişilebilir repo'lar |
+| GET | `/organizations/:org/github/repositories` | Owner/Admin: organizasyon GitHub bağlantısının erişebildiği repository'ler |
 | GET | `/projects/:pid/github/objects` | Yerel branch, commit, issue, PR, review, check, release |
 | POST | `/projects/:pid/github/resync` | Admin: kalıcı resync job oluştur |
 | POST | `/projects/:pid/github/actions` | Idempotency-Key ile GitHub write action |

@@ -2,7 +2,7 @@
 
 ## Otomatik doğrulama
 
-- `npm.cmd test`: **54/54 başarılı**. Gerçek Node HTTP sunucusu, bellek içi SQLite ve yeniden başlatma testlerinde geçici SQLite dosyası kullanılır; harici provider yanıtları test fixture'larıdır. Legacy `idempotency` tablosundaki varsayılan zaman sütunu ile geriye dönük yazma uyumluluğu ve GitHub işlem formunun statik arayüz bağlantısı da doğrulanır.
+- `npm.cmd test`: **55/55 başarılı**. Gerçek Node HTTP sunucusu, bellek içi SQLite ve yeniden başlatma testlerinde geçici SQLite dosyası kullanılır; harici provider yanıtları test fixture'larıdır. Legacy `idempotency` tablosundaki varsayılan zaman sütunu ile geriye dönük yazma uyumluluğu, GitHub işlem formunun statik arayüz bağlantısı ve repository listesinin Owner/Admin sınırı da doğrulanır.
 - Kapsam: login, roller/tenant izolasyonu, takım üyeliği/silme, görevler, özel Kanban kolonu ve sıralaması, yorum/mention, GitHub imzası ve görev ilişkileri, GitHub OAuth hata yönetimi, Slack imzası/aksiyonları, retry/dead-letter, SSE, automation, deadline, proxy rate limit ve transaction kilidi.
 - Olay sıralaması: PR/CI/review commit'ten önce gelse de bağlantılar tamamlanır; değişmemiş resync snapshot'ları eksik ilişkileri onarır; tekrar işleme görev bildirimi ve CI yorumunu çoğaltmaz.
 - Gecikmiş olaylar: eski PR açılışı merge edilmiş görevi geri taşımaz; başarıyla sonuçlanmış check için bekleyen eski hata automation'ı çalışmaz. PR başlığı güncellemesi bekleyen geçerli açılış/merge işlemini engellemez.

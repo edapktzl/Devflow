@@ -94,6 +94,18 @@ test('OAuth callback exchanges code, encrypts token, binds org and consumes stat
  }finally{globalThis.fetch=original;}
  const integration=get('SELECT * FROM integrations WHERE org_id=? AND provider=?',org,'github');assert.equal(crypt(integration.token,true),'oauth-test-token');assert.equal(integration.external_id,'99');assert.ok(!JSON.stringify(await api(`/organizations/${org}/integrations`)).includes('token'));
 });
+test('GitHub repository listing is restricted to organization owners and admins',async()=>{
+ const original=globalThis.fetch;
+ try{
+  globalThis.fetch=async(url,options)=>{
+   if(String(url).startsWith(base))return original(url,options);
+   assert.equal(url,'https://api.github.com/user/repos?sort=updated&per_page=100&page=1');
+   return new Response(JSON.stringify([{full_name:'private/repository'}]));
+  };
+  assert.deepEqual(await api(`/organizations/${org}/github/repositories`),[{full_name:'private/repository'}]);
+  assert.equal((await request(`/api/organizations/${org}/github/repositories`,'GET',undefined,viewer)).status,403);
+ }finally{globalThis.fetch=original;}
+});
 test('OAuth provider failures return safe actionable errors without secrets',async()=>{
  const start=await api(`/organizations/${org}/oauth/slack`,'POST',{}),state=new URL(start.url).searchParams.get('state');const original=globalThis.fetch;try{globalThis.fetch=async(url,options)=>String(url).startsWith(base)?original(url,options):new Response(JSON.stringify({ok:false,error:'invalid_code'}),{status:200});const rejected=await request(`/oauth/slack/callback?state=${state}&code=bad`);assert.equal(rejected.status,502);assert.equal(rejected.body.error,'slack OAuth authorization failed: invalid_code');
  const retry=await api(`/organizations/${org}/oauth/slack`,'POST',{}),retryState=new URL(retry.url).searchParams.get('state');globalThis.fetch=async(url,options)=>{if(String(url).startsWith(base))return original(url,options);throw Object.assign(new Error('network unavailable'),{cause:{code:'EACCES'}})};const unavailable=await request(`/oauth/slack/callback?state=${retryState}&code=network`);assert.equal(unavailable.status,502);assert.equal(unavailable.body.error,'slack OAuth token exchange unavailable');}finally{globalThis.fetch=original;}

@@ -84,7 +84,7 @@ route('GET','/api/organizations/:org/audit',({user,p})=>{access(user,p.org,false
 route('GET','/api/organizations/:org/integrations',({user,p})=>{access(user,p.org);return all('SELECT provider,external_id FROM integrations WHERE org_id=?',p.org);});
 route('GET','/api/organizations/:org/slack/identities',({user,p})=>{access(user,p.org);return all('SELECT user_id,external_id AS slack_user_id FROM identities WHERE provider=? AND org_id=? AND user_id=?','slack',p.org,user);});
 route('DELETE','/api/organizations/:org/integrations/:provider',({user,p})=>{access(user,p.org,true,true);run('DELETE FROM integrations WHERE org_id=? AND provider=?',p.org,p.provider);audit(p.org,user,'integration.disconnected',{provider:p.provider});return {ok:true};});
-route('GET','/api/organizations/:org/github/repositories',async({user,p})=>{access(user,p.org);return pages(p.org,'/user/repos?sort=updated');},{async:true});
+route('GET','/api/organizations/:org/github/repositories',async({user,p})=>{access(user,p.org,false,true);return pages(p.org,'/user/repos?sort=updated');},{async:true});
 route('GET','/api/projects/:pid/github/objects',({user,p})=>{project(user,p.pid);return all('SELECT * FROM external_objects WHERE project_id=?',p.pid);});
 route('POST','/api/projects/:pid/github/resync',({user,p})=>{project(user,p.pid,true,true);enqueue(`resync:${id()}`,'resync',{project_id:p.pid});return {queued:true};});
 route('POST','/api/projects/:pid/github/actions',({user,p,b,req})=>githubAction(user,p.pid,b,req.headers['idempotency-key']),{async:true});

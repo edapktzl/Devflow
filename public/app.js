@@ -1,6 +1,6 @@
 import { createTeamManager } from './teams.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let token=sessionStorage.getItem('devflow-token'),me,org,pid,board,members=[],selected,tab='board',streamController,preferredPid;
+let token=sessionStorage.getItem('devflow-token'),me,org,pid,board,members=[],selected,tab='board',streamController,preferredPid,orgRoles=new Map();
 const notice=(message,error=false)=>{$('#notice').textContent=message;$('#notice').className=error?'error':'success';};
 async function api(path,method='GET',body,idempotencyKey){const r=await fetch('/api'+path,{method,headers:{Authorization:`Bearer ${token||''}`,'Content-Type':'application/json',...(method==='GET'?{}:{'Idempotency-Key':idempotencyKey||crypto.randomUUID()})},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error);return data;}
 const safe=fn=>async(...args)=>{try{await fn(...args);}catch(e){notice(e.message,true);}};
@@ -34,7 +34,7 @@ $('#registerForm').onsubmit=async event=>{
 };
 $('#authForm').onsubmit=safe(async e=>{e.preventDefault();const data=await api('/auth/login','POST',Object.fromEntries(new FormData(e.target)));token=data.token;sessionStorage.setItem('devflow-token',token);await start();});
 $('#logout').onclick=safe(async()=>{await api('/auth/logout','POST',{});sessionStorage.removeItem('devflow-token');location.reload();});
-async function start(){if(!token)return;me=await api('/me');$('#identity').textContent='@'+me.name;$('#auth').hidden=true;$('#workspace').hidden=false;const query=new URLSearchParams(location.search);const integration=query.get('integration');if(integration&&query.get('status')==='connected'){notice(`${integration==='slack'?'Slack':'GitHub'} bağlantısı başarıyla tamamlandı.`);history.replaceState({},'',location.pathname);}const orgs=await api('/organizations');options($('#org'),orgs);org=$('#org').value;const deep=query.get('task');if(deep){const t=await api(`/tasks/${Number(deep)}`);for(const o of orgs){const projects=await api(`/organizations/${o.id}/projects`);if(projects.some(p=>p.id===t.project_id)){org=o.id;$('#org').value=org;preferredPid=t.project_id;break;}}}await loadOrg();}
+async function start(){if(!token)return;me=await api('/me');$('#identity').textContent='@'+me.name;$('#auth').hidden=true;$('#workspace').hidden=false;const query=new URLSearchParams(location.search);const integration=query.get('integration');if(integration&&query.get('status')==='connected'){notice(`${integration==='slack'?'Slack':'GitHub'} bağlantısı başarıyla tamamlandı.`);history.replaceState({},'',location.pathname);}const orgs=await api('/organizations');orgRoles=new Map(orgs.map(item=>[item.id,item.role]));options($('#org'),orgs);org=$('#org').value;const deep=query.get('task');if(deep){const t=await api(`/tasks/${Number(deep)}`);for(const o of orgs){const projects=await api(`/organizations/${o.id}/projects`);if(projects.some(p=>p.id===t.project_id)){org=o.id;$('#org').value=org;preferredPid=t.project_id;break;}}}await loadOrg();}
 async function loadOrg(){streamController?.abort();if(!org){$('#kanban').innerHTML='<p class="empty">İlk organizasyonunuzu oluşturun.</p>';return;}members=await api(`/organizations/${org}/members`);const projects=await api(`/organizations/${org}/projects`);options($('#project'),projects);if(preferredPid){$('#project').value=preferredPid;preferredPid=null;}pid=$('#project').value;await loadProject();}
 async function loadProject(){streamController?.abort();$('#heading').textContent=$('#project').selectedOptions[0]?.textContent||'Engineering workspace';if(!pid){$('#kanban').innerHTML='<p class="empty">Organizasyonunuza bir proje ekleyin.</p>';return;}await refresh();connectStream();const deep=new URLSearchParams(location.search).get('task');if(deep){history.replaceState({},'','/');await openTask(Number(deep));}}
 async function refresh(){if(tab==='inbox'){await inbox();return;}if(tab==='settings'){await settings();return;}if(!pid)return;if(tab==='board'){board=await api(`/projects/${pid}/board`);renderBoard();}if(tab==='chat')await chat();if(tab==='activity')await activity();}
@@ -64,6 +64,8 @@ async function inbox(){const ns=await api('/notifications');$('#notifications').
 async function settings(){
  const githubActionForm=$('#githubActionForm');
  if(githubActionForm)githubActionForm.hidden=!pid;
+ const canManageIntegrations=['Owner','Admin'].includes(orgRoles.get(org));
+ for(const id of ['githubConnect','repos','repoForm','resync','slackConnect','slackForm','slackIdentityForm']){const element=$('#'+id);if(element)element.hidden=!canManageIntegrations;}
  if(!org){$('#members').innerHTML='<p class="empty">Önce bir organizasyon oluşturup seçin.</p>';$('#rules').innerHTML='';await teamManager.render();return;}
  members=await api(`/organizations/${org}/members`);
  $('#members').innerHTML=members.map(m=>`<div class="item">${esc(m.name)} · ${esc(m.role)}<small>${esc(m.id)}</small></div>`).join('');
