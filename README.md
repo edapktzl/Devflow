@@ -94,7 +94,7 @@ Slack App ayarları:
 - Interactivity Request URL: `https://YOUR_HOST/webhooks/slack`
 - Bot scope: `chat:write`
 
-DevFlow'da Slack hesabını bağlayın, botu proje kanalına davet edin ve kanal ID'sini proje ayarlarına kaydedin. Slack butonlarının çalışması için platform kullanıcı UUID'sini Slack member ID'si (`U...`) ile **Slack kimliği eşle** bölümünden bağlayın.
+DevFlow'da Slack hesabını bağlayın, botu proje kanalına davet edin ve kanal ID'sini proje ayarlarına kaydedin. Slack tokenı veritabanında AES-256-GCM ile şifreli tutulur; bildirim ve interactive action sırasında organization'ın kendi workspace ve kanal eşleşmesi doğrulanır. Slack butonlarının çalışması için platform kullanıcı UUID'sini Slack member ID'si (`U...`) ile **Slack kimliği eşle** bölümünden bağlayın.
 
 Desteklenen aksiyonlar: **Approve**, **Reject**, **Assign to Me** ve **Open Task**.
 

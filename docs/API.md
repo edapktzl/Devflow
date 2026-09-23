@@ -55,7 +55,7 @@ Runtime liste: `GET /api/endpoints`. Başarılı JSON route'ları 200 döner. Ha
 | GET | `/organizations/:org/jobs` | Admin: org kapsamındaki pending/running/dead işler |
 | POST | `/projects/:pid/jobs/:jid/retry` | Admin: bu projenin dead job'ını yeniden dene |
 
-Slack interactive action payload'ında desteklenen action ID'leri `assign`, `approve`, `reject` ve `Open Task` linkidir. `approve`, task'a `Approved in Slack.` yorumu ve `task.review_approved` eventi ekler. `reject`, `Rejected in Slack; returning to In Progress.` yorumu ve `task.review_rejected` eventi ekler; projede `In Progress` kolonu varsa task'ı oraya taşır. Tüm aksiyonlar imza, timestamp, workspace, kanal, Slack identity ve güncel organizasyon üyeliği doğrulamasından geçer.
+Slack interactive action payload'ında desteklenen action ID'leri `assign`, `approve`, `reject` ve `Open Task` linkidir. `approve`, task'a `Approved in Slack.` yorumu ve `task.review_approved` eventi ekler. `reject`, `Rejected in Slack; returning to In Progress.` yorumu ve `task.review_rejected` eventi ekler; projede `In Progress` kolonu varsa task'ı oraya taşır. Tüm aksiyonlar imza, timestamp, workspace, kanal, Slack identity ve güncel organizasyon üyeliği doğrulamasından geçer. Bozuk `payload` 400 döner; tekrar koruması payload'ın normalize edilmiş JSON özetiyle yapılır, alan sırası veya URL encoding değişse de aynı işlem tekrarlanmaz.
 
 ## Public provider uçları
 

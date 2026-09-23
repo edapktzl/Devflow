@@ -115,7 +115,7 @@ stateDiagram-v2
 | Task link | `(task_id, kind, external_id)` unique |
 | Domain event | Semantic provider/object/timestamp/type/task key unique |
 | Notification | `(event_id, user_id)` unique |
-| Slack action | İmzalı form body hash'i ve side effect aynı transaction |
+| Slack action | İmzalı, normalize edilmiş payload hash'i ve side effect aynı transaction |
 | Deadline | `deadline:{task_id}:{due_date}` unique event |
 
 GitHub senkronizasyonu webhook ve resync arasında ortak ingest fonksiyonunu kullanır. Zaman damgaları geçerli ISO tarihleri için zaman dilimleri dikkate alınarak karşılaştırılır; aynı timestamp'li çelişkili değişikliklerin tam nedensellik çözümü PoC sınırıdır. Commit olayları SHA/görev bazında tekilleştirilir. Açık PR'ın içerik güncellemesi `pr.updated` üretir; tekrar açılış bildirimi ve açılış automation'ı üretmez.
