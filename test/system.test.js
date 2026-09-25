@@ -90,7 +90,7 @@ test('OAuth callback exchanges code, encrypts token, binds org and consumes stat
  if(String(url).startsWith(base))return original(url,options);
  if(url==='https://github.com/login/oauth/access_token'){assert.equal(options.body.get('client_id'),'fixture-client');return new Response(JSON.stringify({access_token:'oauth-test-token'}));}
  if(url==='https://api.github.com/user')return new Response(JSON.stringify({id:99}));if(url==='https://api.github.com/repos/TEST/REPO')return new Response(JSON.stringify({full_name:'test/repo'}));throw Error('Unexpected fixture URL '+url);
- };assert.equal((await request(`/oauth/github/callback?state=${state}&code=valid`)).status,200);assert.equal((await request(`/oauth/github/callback?state=${state}&code=valid`)).status,400);await api(`/projects/${pid}`,'PATCH',{repo:'TEST/REPO'});assert.equal(get('SELECT repo FROM projects WHERE id=?',pid).repo,'test/repo');
+ };const callback=await request(`/oauth/github/callback?state=${state}&code=valid`,'GET',undefined,owner,{}, {redirect:'manual'});assert.equal(callback.status,303);assert.match(callback.headers.get('location'),new RegExp(`org=${encodeURIComponent(org)}`));assert.equal((await request(`/oauth/github/callback?state=${state}&code=valid`)).status,400);await api(`/projects/${pid}`,'PATCH',{repo:'TEST/REPO'});assert.equal(get('SELECT repo FROM projects WHERE id=?',pid).repo,'test/repo');
  }finally{globalThis.fetch=original;}
  const integration=get('SELECT * FROM integrations WHERE org_id=? AND provider=?',org,'github');assert.equal(crypt(integration.token,true),'oauth-test-token');assert.equal(integration.external_id,'99');assert.ok(!JSON.stringify(await api(`/organizations/${org}/integrations`)).includes('token'));
 });

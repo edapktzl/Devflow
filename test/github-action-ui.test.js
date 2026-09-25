@@ -12,4 +12,7 @@ test('GitHub settings expose the outbound action form without executing a provid
  assert.match(app,/\/projects\/\$\{pid\}\/github\/actions/);
  assert.match(app,/gerçek GitHub verisini değiştirebilir/);
  assert.match(app,/form\.dataset\.key\|\|crypto\.randomUUID\(\)/);
+ assert.match(app,/query\.get\('org'\)/);
+ assert.match(app,/sessionStorage\.setItem\('devflow-org',org\)/);
+ assert.match(app,/sessionStorage\.setItem\('devflow-project',pid\)/);
 });
