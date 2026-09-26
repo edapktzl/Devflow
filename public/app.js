@@ -75,6 +75,8 @@ async function settings(){
  const slackIdentity=slackIdentities[0];
  if(slackIdentity){$('#slackIdentityForm').elements.user_id.value=slackIdentity.user_id;$('#slackIdentityForm').elements.slack_user_id.value=slackIdentity.slack_user_id;}
  if(!pid){$('#rules').innerHTML='<p class="empty">Önce bir proje oluşturup seçin.</p>';return;}
+ const currentProject=(await api(`/organizations/${org}/projects`)).find(item=>item.id===pid);
+ if(currentProject){$('#repoForm').elements.repo.value=currentProject.repo||'';$('#slackForm').elements.slack_channel.value=currentProject.slack_channel||'';}
  const rules=await api(`/projects/${pid}/rules`);
  $('#rules').innerHTML=rules.filter(r=>r.enabled).map(r=>`<div class="item">${esc(r.trigger)} → ${esc(r.action)}: ${esc(r.value)}<small>Koşul: ${esc(r.condition_status||'Yok')}</small><button data-rule="${esc(r.id)}">Devre dışı bırak</button></div>`).join('');
  $('#rules').querySelectorAll('[data-rule]').forEach(b=>b.onclick=safe(async()=>{await api(`/projects/${pid}/rules/${b.dataset.rule}`,'DELETE',{});await settings();}));

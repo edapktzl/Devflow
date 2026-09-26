@@ -15,6 +15,7 @@ test('GitHub settings expose the outbound action form without executing a provid
  assert.match(app,/query\.get\('org'\)/);
  assert.match(app,/sessionStorage\.setItem\('devflow-org',org\)/);
  assert.match(app,/sessionStorage\.setItem\('devflow-project',pid\)/);
+ assert.match(app,/\$\('#slackForm'\)\.elements\.slack_channel\.value=currentProject\.slack_channel\|\|''/);
  assert.match(html,/body\.app-loading\{visibility:hidden\}/);
  assert.match(html,/body class="app-loading"/);
  assert.match(app,/finally\(\(\)=>document\.body\.classList\.remove\('app-loading'\)\)/);
